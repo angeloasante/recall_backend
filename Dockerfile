@@ -18,6 +18,14 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Set placeholder env vars for build time (real values injected at runtime)
+ENV SUPABASE_URL=https://placeholder.supabase.co
+ENV SUPABASE_ANON_KEY=placeholder
+ENV SUPABASE_SERVICE_KEY=placeholder
+ENV OPENAI_API_KEY=sk-placeholder
+ENV TMDB_API_KEY=placeholder
+ENV GEMINI_API_KEY=placeholder
+
 # Build Next.js
 RUN npm run build
 
