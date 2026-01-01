@@ -7,12 +7,10 @@ import { searchSubtitles } from '@/lib/opensubtitles';
 import { searchMovie, searchMulti, buildImageUrl, TMDBTVShow } from '@/lib/tmdb';
 import { generateEnhancedOverview } from '@/lib/enhance-overview';
 
-// Allow large file uploads
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+// Route segment config for Next.js 14 App Router
+// Large file uploads are handled automatically by formData()
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // 60 seconds timeout
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
