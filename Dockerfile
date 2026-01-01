@@ -12,8 +12,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including dev for build)
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -21,12 +21,15 @@ COPY . .
 # Build Next.js
 RUN npm run build
 
+# Remove dev dependencies after build to reduce image size
+RUN npm prune --production
+
 # Expose port
-EXPOSE 3001
+EXPOSE 3000
 
 # Set environment
 ENV NODE_ENV=production
-ENV PORT=3001
+ENV PORT=3000
 
 # Start the server
 CMD ["npm", "start"]
