@@ -79,14 +79,6 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Get cached trending data (for use by other endpoints)
- */
-export function getCachedTrending() {
-  const isValid = cachedTrendingData && (Date.now() - lastRefreshTime) < CACHE_DURATION_MS;
-  return isValid ? cachedTrendingData : null;
-}
-
-/**
  * POST handler for cron services that use POST
  */
 export async function POST(request: NextRequest) {
