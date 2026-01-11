@@ -60,15 +60,17 @@ class RequestQueue {
   private maxConcurrent: number;
   private processingTimes: number[] = [];
   private requestTimestamps: number[] = [];
+  private activeRequestStartTimes: number[] = []; // Track when each active request started
   
   // Configurable limits
   private readonly MAX_QUEUE_SIZE = 50;
   private readonly REQUEST_TIMEOUT_MS = 120000; // 2 minutes max wait in queue
+  private readonly MAX_REQUEST_TIME_MS = 180000; // 3 minutes max processing time before auto-release
   
   constructor(maxConcurrent: number = 3) {
     this.maxConcurrent = maxConcurrent;
     
-    // Clean up old timestamps every minute
+    // Clean up old timestamps and stale active requests every 30 seconds
     setInterval(() => {
       const oneMinuteAgo = Date.now() - 60000;
       this.requestTimestamps = this.requestTimestamps.filter(t => t > oneMinuteAgo);
@@ -76,7 +78,45 @@ class RequestQueue {
       if (this.processingTimes.length > 100) {
         this.processingTimes = this.processingTimes.slice(-100);
       }
-    }, 60000);
+      
+      // Auto-release stale active requests (safety net for crashed requests)
+      this.cleanupStaleRequests();
+    }, 30000);
+  }
+  
+  /**
+   * Clean up stale requests that have been processing too long
+   * This prevents the queue from getting stuck if a request crashes
+   */
+  private cleanupStaleRequests(): void {
+    const now = Date.now();
+    const staleThreshold = now - this.MAX_REQUEST_TIME_MS;
+    
+    // Count how many active requests are stale
+    const staleCount = this.activeRequestStartTimes.filter(t => t < staleThreshold).length;
+    
+    if (staleCount > 0) {
+      console.log(`⚠️ Cleaning up ${staleCount} stale active request(s)`);
+      
+      // Remove stale timestamps
+      this.activeRequestStartTimes = this.activeRequestStartTimes.filter(t => t >= staleThreshold);
+      
+      // Adjust active count
+      this.activeRequests = this.activeRequestStartTimes.length;
+      
+      // Process waiting queue
+      this.processQueue();
+    }
+  }
+  
+  /**
+   * Force reset the queue (for emergency recovery)
+   */
+  forceReset(): void {
+    console.log('🔄 Force resetting request queue');
+    this.activeRequests = 0;
+    this.activeRequestStartTimes = [];
+    this.queue = [];
   }
   
   /**
@@ -84,6 +124,12 @@ class RequestQueue {
    * Returns immediately with position, or waits for slot
    */
   async requestSlot(priority: number = 0): Promise<QueuePosition> {
+    // Safety check: if no active request start times but activeRequests > 0, reset
+    if (this.activeRequests > 0 && this.activeRequestStartTimes.length === 0) {
+      console.log('⚠️ Detected orphaned activeRequests count, resetting');
+      this.activeRequests = 0;
+    }
+    
     // Check if queue is full
     if (this.queue.length >= this.MAX_QUEUE_SIZE) {
       throw new Error(`Server busy: ${this.queue.length} requests in queue. Please try again in a few minutes.`);
@@ -92,6 +138,7 @@ class RequestQueue {
     // If we have capacity, proceed immediately
     if (this.activeRequests < this.maxConcurrent) {
       this.activeRequests++;
+      this.activeRequestStartTimes.push(Date.now());
       this.requestTimestamps.push(Date.now());
       return {
         position: 0,
@@ -143,6 +190,11 @@ class RequestQueue {
   releaseSlot(processingTimeMs?: number): void {
     this.activeRequests = Math.max(0, this.activeRequests - 1);
     
+    // Remove oldest active request timestamp
+    if (this.activeRequestStartTimes.length > 0) {
+      this.activeRequestStartTimes.shift();
+    }
+    
     if (processingTimeMs) {
       this.processingTimes.push(processingTimeMs);
     }
@@ -159,6 +211,7 @@ class RequestQueue {
       const next = this.queue.shift();
       if (next) {
         this.activeRequests++;
+        this.activeRequestStartTimes.push(Date.now());
         this.requestTimestamps.push(Date.now());
         
         const position = 0;
