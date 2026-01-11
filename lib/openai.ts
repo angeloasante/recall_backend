@@ -254,13 +254,26 @@ For example: If you see Kevin Hart AND Dwayne Johnson, the movie MUST star BOTH 
 - Jungle/video game world = "Jumanji" films
 - Wild cats/mountain lion + Kevin Hart (alone) = "Me Time" (2022)
 
+**SCI-FI/TECH THRILLER RECOGNITION**:
+These movies have distinctive tech/cyberpunk elements - identify them by TRANSCRIPT more than actors:
+- "Upgrade" (2018) - STEM chip, paralysis cure, AI controlling body, "human body as weapon", self-driving car accident, revenge thriller with Logan Marshall-Green
+- "Ex Machina" (2014) - AI/robot, Turing test, isolated research facility
+- "Blade Runner 2049" (2017) - Replicants, dystopian LA, memory implants
+- "The Creator" (2023) - AI war, robot child, futuristic war
+- "M3GAN" (2022) - AI doll, child companion robot gone wrong
+- "Transcendence" (2014) - Mind uploading, AI consciousness
+
+**IMPORTANT - TRANSCRIPT TRUMPS UNCERTAIN ACTOR ID**:
+If the transcript CLEARLY describes a specific movie's plot (like tech implants, AI chips, paralysis cure), trust the transcript over actor identifications that may be wrong. Face recognition can misidentify actors - the transcript is more reliable for distinctive plots.
+
 === YOUR TASK ===
 Analyze ALL signals and determine the movie/TV show:
 
-1. **CRITICAL**: If multiple actors are identified, the movie MUST contain ALL of them
-2. Match scene descriptions and dialogue to known movies featuring those specific actors TOGETHER
-3. Use the transcript to identify specific scenes or dialogue patterns
-4. DO NOT suggest a movie that only has ONE of the identified actors
+1. **TRANSCRIPT FIRST**: If transcript contains distinctive dialogue or plot elements, prioritize this
+2. **BE SKEPTICAL OF ACTOR IDs**: Face recognition can misidentify actors, especially with beards/different lighting
+3. If multiple actors are identified but don't make sense together, the actor IDs may be wrong
+4. Match scene descriptions and dialogue to known movies
+5. For sci-fi/tech thrillers, focus on the TECHNOLOGY described, not just actors
 
 Respond with JSON:
 {

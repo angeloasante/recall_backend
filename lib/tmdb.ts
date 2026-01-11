@@ -430,6 +430,17 @@ export async function findMoviesWithActors(actorNames: string[]): Promise<Array<
   
   console.log(`  🔍 Searching TMDB for movies with actors: ${actorNames.join(', ')}`);
   
+  // Talk shows, variety shows, news programs to exclude
+  const excludedShowPatterns = [
+    'tonight show', 'late show', 'late night', 'jimmy fallon', 'jimmy kimmel',
+    'conan', 'ellen', 'graham norton', 'jonathan ross', 'james corden',
+    'good morning', 'today show', 'entertainment tonight', 'access hollywood',
+    'e! news', 'extra', 'inside edition', 'the view', 'live with',
+    'saturday night live', 'snl', 'comic con', 'award', 'ceremony',
+    'premiere', 'red carpet', 'interview', 'behind the scenes',
+    'making of', 'documentary', 'themselves'
+  ];
+  
   // Get filmography for each actor
   const actorFilmographies = new Map<string, Array<{ id: number; title: string; year: number; media_type: 'movie' | 'tv'; popularity: number }>>();
   
@@ -449,6 +460,11 @@ export async function findMoviesWithActors(actorNames: string[]): Promise<Array<
   
   for (const [actorName, filmography] of actorFilmographies) {
     for (const movie of filmography) {
+      // Skip talk shows, variety shows, and other non-narrative content
+      const titleLower = movie.title.toLowerCase();
+      const isExcluded = excludedShowPatterns.some(pattern => titleLower.includes(pattern));
+      if (isExcluded) continue;
+      
       const existing = movieActorMap.get(movie.id);
       if (existing) {
         existing.actors.push(actorName);
@@ -479,6 +495,10 @@ export async function findMoviesWithActors(actorNames: string[]): Promise<Array<
       // First sort by number of matched actors
       if (b.matchedActors.length !== a.matchedActors.length) {
         return b.matchedActors.length - a.matchedActors.length;
+      }
+      // Prefer movies over TV shows (less likely to be talk shows)
+      if (a.media_type !== b.media_type) {
+        return a.media_type === 'movie' ? -1 : 1;
       }
       // Then by year (newer first)
       if (b.year !== a.year) {
