@@ -267,16 +267,60 @@ export async function searchMulti(title: string, year?: number | null): Promise<
     // Filter to only movies and TV shows
     const mediaResults = data.results.filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv');
     
-    // If year provided, try to match it
-    let bestMatch = mediaResults[0];
+    if (mediaResults.length === 0) return null;
+    
+    const normalizedSearchTitle = title.toLowerCase().trim();
+    
+    // Priority matching:
+    // 1. Exact title + exact year match
+    // 2. Exact title match (any year)
+    // 3. Year match with similar title
+    // 4. First result
+    
+    let bestMatch = null;
+    
+    // 1. Exact title + exact year match
     if (year) {
-      const yearMatch = mediaResults.find((r: any) => {
+      bestMatch = mediaResults.find((r: any) => {
+        const itemTitle = (r.media_type === 'movie' ? r.title : r.name)?.toLowerCase().trim();
+        const itemYear = r.media_type === 'movie' 
+          ? parseInt(r.release_date?.substring(0, 4))
+          : parseInt(r.first_air_date?.substring(0, 4));
+        return itemTitle === normalizedSearchTitle && itemYear === year;
+      });
+      if (bestMatch) {
+        console.log(`  ✓ TMDB: Exact title + year match`);
+      }
+    }
+    
+    // 2. Exact title match (any year) - important for cases like "Upgrade" vs "Upgraded"
+    if (!bestMatch) {
+      bestMatch = mediaResults.find((r: any) => {
+        const itemTitle = (r.media_type === 'movie' ? r.title : r.name)?.toLowerCase().trim();
+        return itemTitle === normalizedSearchTitle;
+      });
+      if (bestMatch) {
+        console.log(`  ✓ TMDB: Exact title match`);
+      }
+    }
+    
+    // 3. Year match with similar title
+    if (!bestMatch && year) {
+      bestMatch = mediaResults.find((r: any) => {
         const itemYear = r.media_type === 'movie' 
           ? parseInt(r.release_date?.substring(0, 4))
           : parseInt(r.first_air_date?.substring(0, 4));
         return itemYear === year;
       });
-      if (yearMatch) bestMatch = yearMatch;
+      if (bestMatch) {
+        console.log(`  ✓ TMDB: Year match`);
+      }
+    }
+    
+    // 4. Fall back to first result
+    if (!bestMatch) {
+      bestMatch = mediaResults[0];
+      console.log(`  ⚠️ TMDB: Using first result (no exact match)`);
     }
 
     if (!bestMatch) return null;

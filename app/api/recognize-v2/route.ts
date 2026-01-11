@@ -630,15 +630,26 @@ export async function POST(req: NextRequest) {
           .from('movies')
           .select('*')
           .or(`title.ilike.%${finalTitle}%,title.ilike.%${finalTitle.split(/[:\-–]/)[0].trim()}%`)
-          .limit(5);
+          .limit(10);
 
-        // Find best match (prefer year match)
-        movie = titleMatches?.find(m => m.year === finalYear) || 
-                titleMatches?.find(m => m.title.toLowerCase() === finalTitle.toLowerCase()) ||
-                titleMatches?.[0];
+        // Find best match with priority:
+        // 1. Exact title + year match
+        // 2. Exact title match (case-insensitive)
+        // 3. Year match with similar title
+        // 4. First result (least preferred)
+        const normalizedTitle = finalTitle.toLowerCase().trim();
+        
+        movie = titleMatches?.find(m => 
+          m.title.toLowerCase().trim() === normalizedTitle && m.year === finalYear
+        ) || 
+        titleMatches?.find(m => 
+          m.title.toLowerCase().trim() === normalizedTitle
+        ) ||
+        titleMatches?.find(m => m.year === finalYear) ||
+        null; // Don't take first result if no good match - let TMDB handle it
         
         if (movie) {
-          console.log(`  ✓ Found by title search: "${movie.title}" (ID: ${movie.id})`);
+          console.log(`  ✓ Found by title search: "${movie.title}" (${movie.year}) (ID: ${movie.id})`);
         }
       }
     }

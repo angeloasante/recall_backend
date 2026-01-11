@@ -268,8 +268,14 @@ Respond with JSON:
   "year": 2024,
   "confidence": 0.0-1.0,
   "reasoning": "Explain which signals led to this identification and confirm ALL identified actors are in this movie",
-  "matchedSignals": ["transcript", "actors", "scene", etc.]
+  "matchedSignals": ["transcript", "actors", "scene", etc.],
+  "alternativeTitles": [
+    {"title": "Second Best Guess", "year": 2023, "confidence": 0.6},
+    {"title": "Third Best Guess", "year": 2022, "confidence": 0.4}
+  ]
 }
+
+IMPORTANT: Always include 2-3 alternative guesses in "alternativeTitles" array, even if less confident.
 
 If you cannot confidently identify the movie, respond with "Unknown" and confidence 0.3.`;
 
@@ -281,6 +287,15 @@ If you cannot confidently identify the movie, respond with "Unknown" and confide
   });
 
   const result = JSON.parse(response.choices[0].message.content || '{}');
+  
+  // Log all candidates/alternatives the AI considered
+  console.log(`  🎯 AI Primary Guess: "${result.title}" (${result.year}) - ${Math.round((result.confidence || 0) * 100)}% confidence`);
+  if (result.alternativeTitles && result.alternativeTitles.length > 0) {
+    console.log(`  📋 AI Alternative Guesses:`);
+    result.alternativeTitles.forEach((alt: any, i: number) => {
+      console.log(`     ${i + 1}. "${alt.title}" (${alt.year}) - ${Math.round((alt.confidence || 0) * 100)}%`);
+    });
+  }
   
   return {
     title: result.title || 'Unknown',
