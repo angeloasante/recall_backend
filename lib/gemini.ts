@@ -37,6 +37,70 @@ interface GeminiResponse {
 }
 
 /**
+ * Transcribe audio using Gemini (alternative to Whisper)
+ * Gemini 2.0 Flash supports audio input
+ */
+export async function transcribeAudioGemini(audioBuffer: Buffer): Promise<string> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY not configured');
+  }
+
+  const audioBase64 = audioBuffer.toString('base64');
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
+
+  try {
+    const response = await fetch(
+      `${GEMINI_BASE_URL}/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  inline_data: {
+                    mime_type: 'audio/wav',
+                    data: audioBase64,
+                  },
+                },
+                {
+                  text: 'Transcribe this audio clip. Return ONLY the transcribed text, nothing else. If you hear dialogue from a movie or TV show, include it exactly as spoken.',
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 2048,
+          },
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    clearTimeout(timeoutId);
+    const data: GeminiResponse = await response.json();
+    
+    if (data.error) {
+      throw new Error(data.error.message);
+    }
+
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Gemini transcription timed out after 20s');
+    }
+    throw error;
+  }
+}
+
+/**
  * Analyze image with Gemini Flash
  * Using gemini-2.0-flash (stable) - has higher quota than experimental
  */
@@ -308,4 +372,182 @@ export async function analyzeFrameComplete(frameBase64: string): Promise<{
   ]);
 
   return { ocr, actors, scene };
+}
+
+/**
+ * ONE-SHOT Movie Recognition - Everything in ONE Gemini Call
+ * Analyzes frames, audio transcript, and identifies the movie all at once
+ * This is MUCH faster than multiple separate API calls
+ */
+export async function recognizeMovieOneShot(
+  frames: Buffer[],
+  audioTranscript: string
+): Promise<{
+  title: string;
+  year: number | null;
+  confidence: number;
+  reasoning: string;
+  matchedSignals: string[];
+  alternativeTitles: Array<{ title: string; year: number; confidence: number }>;
+  actors: string[];
+  ocrText: string[];
+  sceneDescription: string;
+}> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY not configured');
+  }
+
+  // Convert frames to base64 and build parts array
+  const imageParts = frames.slice(0, 4).map((frame, i) => ({
+    inline_data: {
+      mime_type: 'image/jpeg',
+      data: frame.toString('base64'),
+    },
+  }));
+
+  const prompt = `You are an expert movie and TV show identifier. I'm showing you ${frames.length} frames from a video clip along with the audio transcript. Your job is to analyze ALL signals and identify the movie or TV show.
+
+=== SIGNAL 1: AUDIO TRANSCRIPT ===
+${audioTranscript || '(no audio transcript available)'}
+
+=== SIGNAL 2: VISUAL FRAMES ===
+I've provided ${frames.length} frames from the video. Analyze them for:
+- Actor faces (who do you recognize?)
+- On-screen text (titles, credits, subtitles - IGNORE TikTok/Instagram/YouTube watermarks)
+- Scene setting, action, mood, visual style, costumes, props
+
+=== CRITICAL IDENTIFICATION RULES ===
+
+**IGNORE SOCIAL MEDIA WATERMARKS**: TikTok, Instagram, YouTube logos/handles are WHERE the clip is shared, NOT the source. Identify the ORIGINAL movie/TV show.
+
+**TRANSCRIPT TRUMPS UNCERTAIN ACTOR ID**: If the transcript CLEARLY describes a specific movie's plot, trust it over actor identifications that may be wrong. Face recognition can misidentify actors - the transcript is more reliable for distinctive plots.
+
+**VERIFY ALL ACTORS**: If multiple actors are identified, the movie MUST contain ALL of them.
+
+**KEVIN HART + DWAYNE JOHNSON MOVIES (when BOTH are identified)**:
+- "Central Intelligence" (2016) - Comedy, CIA agent recruits old classmate
+- "Jumanji: Welcome to the Jungle" (2017) - Adventure, video game jungle world
+- "Jumanji: The Next Level" (2019) - Adventure, video game sequel
+
+**KEVIN HART SOLO MOVIES (only Kevin Hart alone)**:
+- "Me Time" (2022) - Netflix comedy with Mark Wahlberg, wild cats/mountain lion
+- "Lift" (2024) - Heist movie
+- "Die Hart" (2020-2023) - Action comedy series (NO Dwayne Johnson!)
+- "Ride Along" (2014, 2016) - Comedy with Ice Cube
+
+**DWAYNE JOHNSON SOLO MOVIES (only Dwayne Johnson alone)**:
+- "Black Adam" (2022) - Superhero
+- "Red Notice" (2021) - Action comedy with Ryan Reynolds
+- "Jungle Cruise" (2021) - Adventure with Emily Blunt
+- "Fast & Furious" franchise - Action
+
+**SCI-FI/TECH THRILLER RECOGNITION** (identify by TRANSCRIPT/PLOT):
+- "Upgrade" (2018) - STEM chip, paralysis cure, AI controlling body, "human body as weapon", self-driving car accident, revenge thriller with Logan Marshall-Green
+- "Ex Machina" (2014) - AI/robot, Turing test, isolated research facility
+- "Blade Runner 2049" (2017) - Replicants, dystopian LA, memory implants
+- "The Creator" (2023) - AI war, robot child, futuristic war
+- "M3GAN" (2022) - AI doll, child companion robot gone wrong
+- "Transcendence" (2014) - Mind uploading, AI consciousness
+
+**WAR/DRAMA RECOGNITION**:
+- "Beasts of No Nation" (2015) - Child soldiers, African civil war, Idris Elba as warlord
+- "Blood Diamond" (2006) - Sierra Leone, conflict diamonds, Leonardo DiCaprio
+- "Hotel Rwanda" (2004) - Rwandan genocide, hotel manager saves refugees
+
+**SCENE CONTEXT CLUES**:
+- Kevin Hart + Dwayne Johnson + comedy/action = "Central Intelligence" or "Jumanji"
+- Modern day + spy/CIA themes = "Central Intelligence" (2016)
+- Jungle/video game world = "Jumanji" films
+- AI chip + paralyzed protagonist + revenge = "Upgrade" (2018)
+- Child soldiers + African setting + Idris Elba = "Beasts of No Nation"
+
+=== YOUR TASK ===
+1. **TRANSCRIPT FIRST**: If transcript contains distinctive dialogue or plot elements, prioritize this
+2. **BE SKEPTICAL OF ACTOR IDs**: Face recognition can misidentify actors, especially with beards/different lighting
+3. If actors identified don't make sense together, they may be wrong - trust transcript
+4. For sci-fi/tech thrillers, focus on the TECHNOLOGY described, not just actors
+5. ALWAYS provide 2-3 alternative guesses
+
+=== RESPOND WITH JSON ===
+{
+  "title": "Movie or TV Show Title",
+  "year": 2024,
+  "confidence": 0.0-1.0,
+  "reasoning": "Detailed explanation of how you identified this. Mention which signals matched and why you trust them.",
+  "matchedSignals": ["transcript", "actors", "scene", "ocr"],
+  "alternativeTitles": [
+    {"title": "Second guess", "year": 2023, "confidence": 0.5},
+    {"title": "Third guess", "year": 2022, "confidence": 0.3}
+  ],
+  "actors": ["Actor Name 1", "Actor Name 2"],
+  "ocrText": ["any text seen on screen excluding social media watermarks"],
+  "sceneDescription": "Brief description of setting, action, mood, visual style"
+}
+
+If you cannot identify the movie with any confidence, use title "Unknown" and confidence 0.3.`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for this comprehensive call
+
+  try {
+    const response = await fetch(
+      `${GEMINI_BASE_URL}/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                ...imageParts,
+                { text: prompt },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 2048,
+          },
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    clearTimeout(timeoutId);
+    const data: GeminiResponse = await response.json();
+    
+    if (data.error) {
+      throw new Error(data.error.message);
+    }
+
+    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    // Parse JSON from response
+    const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in Gemini response');
+    }
+    
+    const result = JSON.parse(jsonMatch[0]);
+    
+    return {
+      title: result.title || 'Unknown',
+      year: result.year || null,
+      confidence: result.confidence || 0.3,
+      reasoning: result.reasoning || 'No reasoning provided',
+      matchedSignals: result.matchedSignals || [],
+      alternativeTitles: result.alternativeTitles || [],
+      actors: result.actors || [],
+      ocrText: result.ocrText || [],
+      sceneDescription: result.sceneDescription || '',
+    };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Gemini one-shot recognition timed out after 30s');
+    }
+    throw error;
+  }
 }
