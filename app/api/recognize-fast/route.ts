@@ -29,37 +29,66 @@ export const maxDuration = 60;
 
 // Helper: Check if movie exists in DB with full data
 async function findMovieInDatabase(title: string, year?: number | null): Promise<any | null> {
-  // Try exact match first
-  const { data: exactMatch } = await supabaseAdmin
+  console.log(`  🔎 Searching DB for: "${title}" (${year || 'any year'})`);
+  
+  // Try exact title match first (case insensitive)
+  const { data: exactMatches, error: exactError } = await supabaseAdmin
     .from('movies')
     .select('*, movie_cast(artist_id)')
     .ilike('title', title)
-    .eq('year', year || 0)
-    .limit(1)
-    .single();
+    .limit(5);
   
-  if (exactMatch) {
-    const hasCast = exactMatch.movie_cast && exactMatch.movie_cast.length > 0;
-    console.log(`  ✓ DB exact match: "${exactMatch.title}" (ID: ${exactMatch.id}, cast cached: ${hasCast})`);
-    return exactMatch;
+  if (exactError) {
+    console.log(`  ⚠️ DB query error: ${exactError.message}`);
   }
   
-  // Try partial match
-  const { data: partialMatch } = await supabaseAdmin
+  if (exactMatches && exactMatches.length > 0) {
+    console.log(`  📊 Found ${exactMatches.length} exact title matches: ${exactMatches.map(m => `"${m.title}" (${m.year})`).join(', ')}`);
+    
+    // If year provided, prefer year match
+    if (year) {
+      const yearMatch = exactMatches.find(m => m.year === year);
+      if (yearMatch) {
+        const hasCast = yearMatch.movie_cast && yearMatch.movie_cast.length > 0;
+        console.log(`  ✓ DB exact match with year: "${yearMatch.title}" (ID: ${yearMatch.id}, year: ${yearMatch.year}, cast cached: ${hasCast})`);
+        return yearMatch;
+      }
+    }
+    
+    // Return first match if no year match
+    const match = exactMatches[0];
+    const hasCast = match.movie_cast && match.movie_cast.length > 0;
+    console.log(`  ✓ DB exact title match: "${match.title}" (ID: ${match.id}, year: ${match.year}, cast cached: ${hasCast})`);
+    return match;
+  }
+  
+  // Try partial match (contains title)
+  const { data: partialMatches } = await supabaseAdmin
     .from('movies')
     .select('*, movie_cast(artist_id)')
     .ilike('title', `%${title}%`)
     .limit(5);
   
-  if (partialMatch && partialMatch.length > 0) {
+  if (partialMatches && partialMatches.length > 0) {
+    console.log(`  📊 Found ${partialMatches.length} partial matches: ${partialMatches.map(m => `"${m.title}" (${m.year})`).join(', ')}`);
+    
     // Prefer exact year match from partial results
-    const yearMatch = partialMatch.find(m => m.year === year);
-    const match = yearMatch || partialMatch[0];
+    if (year) {
+      const yearMatch = partialMatches.find(m => m.year === year);
+      if (yearMatch) {
+        const hasCast = yearMatch.movie_cast && yearMatch.movie_cast.length > 0;
+        console.log(`  ✓ DB partial match with year: "${yearMatch.title}" (ID: ${yearMatch.id}, cast cached: ${hasCast})`);
+        return yearMatch;
+      }
+    }
+    
+    const match = partialMatches[0];
     const hasCast = match.movie_cast && match.movie_cast.length > 0;
     console.log(`  ✓ DB partial match: "${match.title}" (ID: ${match.id}, cast cached: ${hasCast})`);
     return match;
   }
   
+  console.log(`  ❌ No match found in DB for "${title}"`);
   return null;
 }
 
@@ -103,7 +132,8 @@ export async function POST(req: NextRequest) {
     }
 
     const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
-    console.log(`✓ Video: ${videoFile.name} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+    const videoSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+    console.log(`✓ Video: ${videoFile.name} (${videoSizeMB}MB)`);
 
     // Create upload record
     const { data: upload } = await supabaseAdmin

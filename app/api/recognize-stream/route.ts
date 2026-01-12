@@ -32,29 +32,35 @@ function sendEvent(controller: ReadableStreamDefaultController, event: string, d
 
 // Helper: Check if movie exists in DB with full data
 async function findMovieInDatabase(title: string, year?: number | null): Promise<any | null> {
-  // Try exact match first
-  const { data: exactMatch } = await supabaseAdmin
+  // Try exact title match first (case insensitive) - don't require year match
+  const { data: exactMatches } = await supabaseAdmin
     .from('movies')
     .select('*, movie_cast(artist_id)')
     .ilike('title', title)
-    .eq('year', year || 0)
-    .limit(1)
-    .single();
+    .limit(5);
   
-  if (exactMatch) {
-    return exactMatch;
+  if (exactMatches && exactMatches.length > 0) {
+    // If year provided, prefer year match
+    if (year) {
+      const yearMatch = exactMatches.find(m => m.year === year);
+      if (yearMatch) return yearMatch;
+    }
+    return exactMatches[0];
   }
   
-  // Try partial match
-  const { data: partialMatch } = await supabaseAdmin
+  // Try partial match (contains title)
+  const { data: partialMatches } = await supabaseAdmin
     .from('movies')
     .select('*, movie_cast(artist_id)')
     .ilike('title', `%${title}%`)
     .limit(5);
   
-  if (partialMatch && partialMatch.length > 0) {
-    const yearMatch = partialMatch.find(m => m.year === year);
-    return yearMatch || partialMatch[0];
+  if (partialMatches && partialMatches.length > 0) {
+    if (year) {
+      const yearMatch = partialMatches.find(m => m.year === year);
+      if (yearMatch) return yearMatch;
+    }
+    return partialMatches[0];
   }
   
   return null;
