@@ -31,10 +31,10 @@ export const maxDuration = 60;
 async function findMovieInDatabase(title: string, year?: number | null): Promise<any | null> {
   console.log(`  🔎 Searching DB for: "${title}" (${year || 'any year'})`);
   
-  // Try exact title match first (case insensitive)
+  // Try exact title match first (case insensitive) - simple query without joins
   const { data: exactMatches, error: exactError } = await supabaseAdmin
     .from('movies')
-    .select('*, movie_cast(artist_id)')
+    .select('*')
     .ilike('title', title)
     .limit(5);
   
@@ -49,23 +49,21 @@ async function findMovieInDatabase(title: string, year?: number | null): Promise
     if (year) {
       const yearMatch = exactMatches.find(m => m.year === year);
       if (yearMatch) {
-        const hasCast = yearMatch.movie_cast && yearMatch.movie_cast.length > 0;
-        console.log(`  ✓ DB exact match with year: "${yearMatch.title}" (ID: ${yearMatch.id}, year: ${yearMatch.year}, cast cached: ${hasCast})`);
+        console.log(`  ✓ DB exact match with year: "${yearMatch.title}" (ID: ${yearMatch.id}, year: ${yearMatch.year})`);
         return yearMatch;
       }
     }
     
     // Return first match if no year match
     const match = exactMatches[0];
-    const hasCast = match.movie_cast && match.movie_cast.length > 0;
-    console.log(`  ✓ DB exact title match: "${match.title}" (ID: ${match.id}, year: ${match.year}, cast cached: ${hasCast})`);
+    console.log(`  ✓ DB exact title match: "${match.title}" (ID: ${match.id}, year: ${match.year})`);
     return match;
   }
   
   // Try partial match (contains title)
   const { data: partialMatches } = await supabaseAdmin
     .from('movies')
-    .select('*, movie_cast(artist_id)')
+    .select('*')
     .ilike('title', `%${title}%`)
     .limit(5);
   
@@ -76,15 +74,13 @@ async function findMovieInDatabase(title: string, year?: number | null): Promise
     if (year) {
       const yearMatch = partialMatches.find(m => m.year === year);
       if (yearMatch) {
-        const hasCast = yearMatch.movie_cast && yearMatch.movie_cast.length > 0;
-        console.log(`  ✓ DB partial match with year: "${yearMatch.title}" (ID: ${yearMatch.id}, cast cached: ${hasCast})`);
+        console.log(`  ✓ DB partial match with year: "${yearMatch.title}" (ID: ${yearMatch.id})`);
         return yearMatch;
       }
     }
     
     const match = partialMatches[0];
-    const hasCast = match.movie_cast && match.movie_cast.length > 0;
-    console.log(`  ✓ DB partial match: "${match.title}" (ID: ${match.id}, cast cached: ${hasCast})`);
+    console.log(`  ✓ DB partial match: "${match.title}" (ID: ${match.id})`);
     return match;
   }
   

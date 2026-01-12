@@ -32,10 +32,10 @@ function sendEvent(controller: ReadableStreamDefaultController, event: string, d
 
 // Helper: Check if movie exists in DB with full data
 async function findMovieInDatabase(title: string, year?: number | null): Promise<any | null> {
-  // Try exact title match first (case insensitive) - don't require year match
+  // Try exact title match first (case insensitive) - simple query without joins
   const { data: exactMatches } = await supabaseAdmin
     .from('movies')
-    .select('*, movie_cast(artist_id)')
+    .select('*')
     .ilike('title', title)
     .limit(5);
   
@@ -51,7 +51,7 @@ async function findMovieInDatabase(title: string, year?: number | null): Promise
   // Try partial match (contains title)
   const { data: partialMatches } = await supabaseAdmin
     .from('movies')
-    .select('*, movie_cast(artist_id)')
+    .select('*')
     .ilike('title', `%${title}%`)
     .limit(5);
   
