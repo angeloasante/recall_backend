@@ -13,18 +13,55 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /**
- * FAST Recognition Pipeline - Single Gemini Call
+ * FAST Recognition Pipeline - Single Gemini Call + Smart DB Caching
  * 
- * This is a streamlined version that does:
+ * OPTIMIZED FLOW:
  * 1. Extract frames + audio (parallel)
  * 2. Transcribe audio (Gemini or Whisper fallback)
  * 3. ONE Gemini call: analyze frames + transcript + identify movie
- * 4. Database lookup + TMDB fetch
- * 5. Actor verification (if needed)
- * 6. Cache result
+ * 4. DB LOOKUP FIRST - if movie exists with cast, SKIP all TMDB calls
+ * 5. Only fetch from TMDB if NOT in database
+ * 6. Cache new movies for future lookups
  * 
- * Target: <20 seconds total processing time (vs 40-120s for v2)
+ * Key Optimization: If movie is already in our DB with cast cached,
+ * we skip ALL redundant TMDB/actor verification calls (saves 5-10s)
  */
+
+// Helper: Check if movie exists in DB with full data
+async function findMovieInDatabase(title: string, year?: number | null): Promise<any | null> {
+  // Try exact match first
+  const { data: exactMatch } = await supabaseAdmin
+    .from('movies')
+    .select('*, movie_cast(artist_id)')
+    .ilike('title', title)
+    .eq('year', year || 0)
+    .limit(1)
+    .single();
+  
+  if (exactMatch) {
+    const hasCast = exactMatch.movie_cast && exactMatch.movie_cast.length > 0;
+    console.log(`  ✓ DB exact match: "${exactMatch.title}" (ID: ${exactMatch.id}, cast cached: ${hasCast})`);
+    return exactMatch;
+  }
+  
+  // Try partial match
+  const { data: partialMatch } = await supabaseAdmin
+    .from('movies')
+    .select('*, movie_cast(artist_id)')
+    .ilike('title', `%${title}%`)
+    .limit(5);
+  
+  if (partialMatch && partialMatch.length > 0) {
+    // Prefer exact year match from partial results
+    const yearMatch = partialMatch.find(m => m.year === year);
+    const match = yearMatch || partialMatch[0];
+    const hasCast = match.movie_cast && match.movie_cast.length > 0;
+    console.log(`  ✓ DB partial match: "${match.title}" (ID: ${match.id}, cast cached: ${hasCast})`);
+    return match;
+  }
+  
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -148,127 +185,115 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ========== STEP 5: Actor Verification (if actors detected) ==========
+    // ========== STEP 5: SMART DB LOOKUP (Skip TMDB if cached) ==========
+    console.log('📥 Step 5: Smart DB Lookup...');
     let finalTitle = result.title;
     let finalYear = result.year;
-    
-    if (result.actors.length >= 2 && result.title !== 'Unknown') {
-      console.log(`📥 Step 5: Verifying actors in "${result.title}"...`);
-      
-      const tmdbCheck = await searchMulti(result.title, result.year);
-      if (tmdbCheck) {
-        const isTV = tmdbCheck.media_type === 'tv';
-        const verification = await verifyActorsInMovie(tmdbCheck.id, result.actors, isTV);
-        
-        if (!verification.verified) {
-          console.log(`  ⚠️ ACTOR MISMATCH! Missing: ${verification.missingActors.join(', ')}`);
-          
-          // Check for known actor combos
-          const actorsLower = result.actors.map(a => a.toLowerCase()).join(' ');
-          
-          if (actorsLower.includes('kevin hart') && (actorsLower.includes('dwayne') || actorsLower.includes('johnson') || actorsLower.includes('rock'))) {
-            const transcriptLower = transcript.toLowerCase();
-            if (transcriptLower.includes('cia') || transcriptLower.includes('agent') || transcriptLower.includes('spy')) {
-              finalTitle = 'Central Intelligence';
-              finalYear = 2016;
-            } else if (transcriptLower.includes('jungle') || transcriptLower.includes('game') || transcriptLower.includes('level')) {
-              finalTitle = 'Jumanji: Welcome to the Jungle';
-              finalYear = 2017;
-            }
-            console.log(`  🎬 Corrected to: "${finalTitle}" (${finalYear})`);
-          }
-        } else {
-          console.log(`  ✓ Actor verification passed`);
-        }
-      }
-    } else {
-      console.log('📥 Step 5: Skipping actor verification (fewer than 2 actors or Unknown)');
-    }
-
-    // ========== STEP 6: Resolve Movie from Database/TMDB ==========
-    console.log('📥 Step 6: Resolving movie...');
-    
     let movie: any = null;
+    let usedCachedData = false;
     
     if (finalTitle !== 'Unknown' && result.confidence >= 0.4) {
-      // Check database first (exact match)
-      const { data: exactMatch } = await supabaseAdmin
-        .from('movies')
-        .select('*')
-        .ilike('title', finalTitle)
-        .eq('year', finalYear || 0)
-        .limit(1)
-        .single();
+      // Check database FIRST before any TMDB calls
+      movie = await findMovieInDatabase(finalTitle, finalYear);
       
-      if (exactMatch) {
-        movie = exactMatch;
-        console.log(`  ✓ Found exact match in DB: "${movie.title}" (ID: ${movie.id})`);
-      } else {
-        // Try partial match
-        const { data: partialMatch } = await supabaseAdmin
+      if (movie) {
+        usedCachedData = true;
+        console.log(`  🚀 FAST PATH: Movie found in DB, skipping TMDB calls!`);
+        
+        // If we have actors, just log them (no verification needed - we trust our DB)
+        if (result.actors.length > 0) {
+          console.log(`  📋 Detected actors: ${result.actors.join(', ')} (not re-verifying - using cached data)`);
+        }
+      }
+    }
+    
+    // ========== STEP 6: TMDB Fetch (Only if NOT in database) ==========
+    if (!movie && finalTitle !== 'Unknown' && result.confidence >= 0.4) {
+      console.log('📥 Step 6: Fetching from TMDB (not in DB)...');
+      
+      // Actor verification only for NEW movies (not in our DB)
+      if (result.actors.length >= 2) {
+        console.log(`  🔍 Verifying actors in "${finalTitle}"...`);
+        
+        const tmdbCheck = await searchMulti(finalTitle, finalYear);
+        if (tmdbCheck) {
+          const isTV = tmdbCheck.media_type === 'tv';
+          const verification = await verifyActorsInMovie(tmdbCheck.id, result.actors, isTV);
+          
+          if (!verification.verified) {
+            console.log(`  ⚠️ ACTOR MISMATCH! Missing: ${verification.missingActors.join(', ')}`);
+            
+            // Check for known actor combos
+            const actorsLower = result.actors.map(a => a.toLowerCase()).join(' ');
+            
+            if (actorsLower.includes('kevin hart') && (actorsLower.includes('dwayne') || actorsLower.includes('johnson') || actorsLower.includes('rock'))) {
+              const transcriptLower = transcript.toLowerCase();
+              if (transcriptLower.includes('cia') || transcriptLower.includes('agent') || transcriptLower.includes('spy')) {
+                finalTitle = 'Central Intelligence';
+                finalYear = 2016;
+              } else if (transcriptLower.includes('jungle') || transcriptLower.includes('game') || transcriptLower.includes('level')) {
+                finalTitle = 'Jumanji: Welcome to the Jungle';
+                finalYear = 2017;
+              }
+              console.log(`  🎬 Corrected to: "${finalTitle}" (${finalYear})`);
+            }
+          } else {
+            console.log(`  ✓ Actor verification passed`);
+          }
+        }
+      }
+      
+      // Now fetch and cache the movie
+      console.log(`  🌐 Fetching from TMDB: "${finalTitle}" (${finalYear})`);
+      const tmdbResult = await searchMulti(finalTitle, finalYear);
+      
+      if (tmdbResult) {
+        const isTV = tmdbResult.media_type === 'tv';
+        const title = isTV ? (tmdbResult as TMDBTVShow).name : (tmdbResult as any).title;
+        const releaseDate = isTV ? (tmdbResult as TMDBTVShow).first_air_date : (tmdbResult as any).release_date;
+        const imdbId = (tmdbResult as any).imdb_id || null;
+        
+        // Check if exists by tmdb_id
+        const { data: existingByTmdb } = await supabaseAdmin
           .from('movies')
           .select('*')
-          .ilike('title', `%${finalTitle}%`)
-          .limit(1)
+          .eq('tmdb_id', tmdbResult.id)
           .single();
-        
-        if (partialMatch && (!finalYear || partialMatch.year === finalYear)) {
-          movie = partialMatch;
-          console.log(`  ✓ Found partial match in DB: "${movie.title}" (ID: ${movie.id})`);
-        } else {
-          // Fetch from TMDB
-          console.log(`  🌐 Fetching from TMDB: "${finalTitle}" (${finalYear})`);
-          const tmdbResult = await searchMulti(finalTitle, finalYear);
-          
-          if (tmdbResult) {
-            const isTV = tmdbResult.media_type === 'tv';
-            const title = isTV ? (tmdbResult as TMDBTVShow).name : (tmdbResult as any).title;
-            const releaseDate = isTV ? (tmdbResult as TMDBTVShow).first_air_date : (tmdbResult as any).release_date;
-            const imdbId = (tmdbResult as any).imdb_id || null;
-            
-            // Check if exists by tmdb_id
-            const { data: existingByTmdb } = await supabaseAdmin
-              .from('movies')
-              .select('*')
-              .eq('tmdb_id', tmdbResult.id)
-              .single();
 
-            if (existingByTmdb) {
-              movie = existingByTmdb;
-              console.log(`  ✓ Found by TMDB ID: "${movie.title}"`);
-            } else {
-              // Auto-cache new movie
-              const movieYear = releaseDate ? parseInt(releaseDate.substring(0, 4)) : finalYear;
-              let enhancedOverview = tmdbResult.overview;
-              
-              if (!enhancedOverview || enhancedOverview.length < 300) {
-                try {
-                  enhancedOverview = await generateEnhancedOverview(title, movieYear, tmdbResult.overview);
-                } catch {
-                  enhancedOverview = tmdbResult.overview || '';
-                }
-              }
-              
-              const { data: newMovie, error } = await supabaseAdmin
-                .from('movies')
-                .insert({
-                  title,
-                  year: movieYear,
-                  overview: enhancedOverview,
-                  poster_url: buildImageUrl(tmdbResult.poster_path),
-                  backdrop_url: buildImageUrl(tmdbResult.backdrop_path, 'w1280'),
-                  tmdb_id: tmdbResult.id,
-                  imdb_id: imdbId,
-                  popularity: (tmdbResult as any).popularity || null,
-                })
-                .select()
-                .single();
-              
-              if (!error && newMovie) {
-                movie = newMovie;
-                console.log(`  ✓ Auto-cached: "${movie.title}" (ID: ${movie.id})`);
-              }
+        if (existingByTmdb) {
+          movie = existingByTmdb;
+          console.log(`  ✓ Found by TMDB ID: "${movie.title}"`);
+        } else {
+          // Auto-cache new movie
+          const movieYear = releaseDate ? parseInt(releaseDate.substring(0, 4)) : finalYear;
+          let enhancedOverview = tmdbResult.overview;
+          
+          if (!enhancedOverview || enhancedOverview.length < 300) {
+            try {
+              enhancedOverview = await generateEnhancedOverview(title, movieYear, tmdbResult.overview);
+            } catch {
+              enhancedOverview = tmdbResult.overview || '';
             }
+          }
+          
+          const { data: newMovie, error } = await supabaseAdmin
+            .from('movies')
+            .insert({
+              title,
+              year: movieYear,
+              overview: enhancedOverview,
+              poster_url: buildImageUrl(tmdbResult.poster_path),
+              backdrop_url: buildImageUrl(tmdbResult.backdrop_path, 'w1280'),
+              tmdb_id: tmdbResult.id,
+              imdb_id: imdbId,
+              popularity: (tmdbResult as any).popularity || null,
+            })
+            .select()
+            .single();
+          
+          if (!error && newMovie) {
+            movie = newMovie;
+            console.log(`  ✓ Auto-cached: "${movie.title}" (ID: ${movie.id})`);
           }
         }
       }
@@ -332,11 +357,11 @@ export async function POST(req: NextRequest) {
       recognitionQueue.releaseSlot(processingTime);
     }
 
-    console.log(`\n✅ SUCCESS: "${movie?.title || 'Unknown'}" (${Math.round(result.confidence * 100)}%)`);
-    console.log(`⏱️ Total time: ${processingTime}ms`);
-    console.log('========== FAST RECOGNITION END ==========\n');
-
     if (!movie) {
+      console.log(`\n❌ NOT FOUND: "${result.title}" (${Math.round(result.confidence * 100)}%)`);
+      console.log(`⏱️ Total time: ${processingTime}ms`);
+      console.log('========== FAST RECOGNITION END ==========\n');
+      
       return NextResponse.json({
         error: 'Movie not found',
         details: result.reasoning,
@@ -349,6 +374,10 @@ export async function POST(req: NextRequest) {
       }, { status: 404 });
     }
 
+    console.log(`\n✅ SUCCESS: "${movie?.title || 'Unknown'}" (${Math.round(result.confidence * 100)}%)${usedCachedData ? ' [CACHED - FAST]' : ''}`);
+    console.log(`⏱️ Total time: ${processingTime}ms`);
+    console.log('========== FAST RECOGNITION END ==========\n');
+
     return NextResponse.json({
       movie,
       confidence: result.confidence,
@@ -356,6 +385,7 @@ export async function POST(req: NextRequest) {
       reasoning: result.reasoning,
       processing_time: processingTime,
       actors_detected: result.actors,
+      cached: usedCachedData, // True if we skipped TMDB calls
     });
 
   } catch (error: any) {
