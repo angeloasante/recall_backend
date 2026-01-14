@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     console.log(`✓ Video: ${videoFile.name} (${videoSizeMB}MB)`);
 
     // Create upload record
-    const { data: upload } = await supabaseAdmin
+    const { data: upload, error: uploadError } = await supabaseAdmin
       .from('user_uploads')
       .insert({ 
         video_url: null, // Not storing videos to save storage costs
@@ -140,6 +140,12 @@ export async function POST(req: NextRequest) {
       })
       .select()
       .single();
+    
+    if (uploadError) {
+      console.log(`⚠️ Failed to create upload record: ${uploadError.message}`);
+    } else {
+      console.log(`✓ Created upload record: ID ${upload?.id}, user_id: ${userId || 'null'}`);
+    }
 
     // Video upload disabled - not needed for display, saves storage
     // uploadVideo(videoBuffer, videoFile.name)
@@ -218,23 +224,29 @@ export async function POST(req: NextRequest) {
       if (instantMovie) {
         const processingTime = Date.now() - startTime;
         
-        // Background: Update upload record (fire-and-forget)
+        // Update upload record (await to ensure it's saved before returning)
         if (upload) {
-          Promise.resolve(
-            supabaseAdmin
-              .from('user_uploads')
-              .update({
-                result_movie_id: instantMovie.id,
-                confidence_score: result.confidence,
-                matched_signals: { 
-                  signals: result.matchedSignals,
-                  reasoning: result.reasoning,
-                  actors_detected: result.actors,
-                },
-                processing_time_ms: processingTime,
-              })
-              .eq('id', upload.id)
-          ).catch(() => {});
+          const { error: updateError } = await supabaseAdmin
+            .from('user_uploads')
+            .update({
+              result_movie_id: instantMovie.id,
+              confidence_score: result.confidence,
+              matched_signals: { 
+                signals: result.matchedSignals,
+                reasoning: result.reasoning,
+                actors_detected: result.actors,
+              },
+              processing_time_ms: processingTime,
+            })
+            .eq('id', upload.id);
+          
+          if (updateError) {
+            console.log(`⚠️ Failed to update upload record: ${updateError.message}`);
+          } else {
+            console.log(`✓ Updated upload record ${upload.id} with movie_id ${instantMovie.id}`);
+          }
+        } else {
+          console.log(`⚠️ No upload record to update!`);
         }
 
         if (queueSlotAcquired) {
