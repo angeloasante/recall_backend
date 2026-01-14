@@ -41,6 +41,28 @@ export async function GET(
       });
     }
 
+    // ========== CHECK CACHE FIRST ==========
+    // Check if we have cached similar movie IDs (stored as JSON array in movie record)
+    if (movie.similar_ids && Array.isArray(movie.similar_ids) && movie.similar_ids.length > 0) {
+      // Fetch the cached similar movies by their IDs
+      const { data: cachedSimilar } = await supabaseAdmin
+        .from('movies')
+        .select('*')
+        .in('id', movie.similar_ids)
+        .limit(6);
+      
+      if (cachedSimilar && cachedSimilar.length > 0) {
+        console.log(`⚡ [Similar] Returning ${cachedSimilar.length} cached similar for "${movie.title}"`);
+        return NextResponse.json({
+          similar: cachedSimilar,
+          cached: true,
+        });
+      }
+    }
+
+    // ========== FETCH FROM TMDB (not cached) ==========
+    console.log(`🔍 [Similar] Fetching from TMDB for "${movie.title}"...`);
+    
     // Try to determine if this is a TV show or movie using multi-search first
     let isTV = false;
     let creditsData: any = { cast: [] };
@@ -263,6 +285,17 @@ export async function GET(
           console.error('Failed to insert similar:', insertError);
         }
       }
+    }
+
+    // ========== CACHE THE RESULTS ==========
+    // Store the similar movie IDs for future instant retrieval
+    if (similarMovies.length > 0) {
+      const similarIds = similarMovies.map((m: any) => m.id);
+      await supabaseAdmin
+        .from('movies')
+        .update({ similar_ids: similarIds })
+        .eq('id', id);
+      console.log(`💾 [Similar] Cached ${similarIds.length} similar IDs for "${movie.title}"`);
     }
 
     return NextResponse.json({

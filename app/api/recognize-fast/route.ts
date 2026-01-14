@@ -135,21 +135,20 @@ export async function POST(req: NextRequest) {
     const { data: upload } = await supabaseAdmin
       .from('user_uploads')
       .insert({ 
-        video_url: 'uploading...',
+        video_url: null, // Not storing videos to save storage costs
         user_id: userId || null,
       })
       .select()
       .single();
 
-    // Background upload (non-blocking)
-    uploadVideo(videoBuffer, videoFile.name)
-      .then(async (url) => {
-        if (upload) {
-          await supabaseAdmin.from('user_uploads').update({ video_url: url }).eq('id', upload.id);
-          console.log(`  ✓ Video uploaded to storage`);
-        }
-      })
-      .catch(() => {});
+    // Video upload disabled - not needed for display, saves storage
+    // uploadVideo(videoBuffer, videoFile.name)
+    //   .then(async (url) => {
+    //     if (upload) {
+    //       await supabaseAdmin.from('user_uploads').update({ video_url: url }).eq('id', upload.id);
+    //     }
+    //   })
+    //   .catch(() => {});
 
     // ========== STEP 2: Extract Features (Parallel) ==========
     console.log('📥 Step 2: Extracting frames & audio...');
@@ -157,7 +156,7 @@ export async function POST(req: NextRequest) {
     
     const [audioResult, framesResult] = await Promise.allSettled([
       extractAudio(videoBuffer),
-      extractFrames(videoBuffer, 4), // Only 4 frames for speed
+      extractFrames(videoBuffer, 2), // Only 2 frames (start + middle) for speed
     ]);
 
     const audioBuffer = audioResult.status === 'fulfilled' ? audioResult.value : null;
@@ -209,6 +208,54 @@ export async function POST(req: NextRequest) {
       result.alternativeTitles.forEach((alt, i) => {
         console.log(`     ${i + 1}. "${alt.title}" (${alt.year}) - ${Math.round(alt.confidence * 100)}%`);
       });
+    }
+
+    // ========== INSTANT RETURN: High confidence DB match ==========
+    // If confidence ≥ 92% and we find it in DB, return immediately (no more steps)
+    if (result.title !== 'Unknown' && result.confidence >= 0.92) {
+      const instantMovie = await findMovieInDatabase(result.title, result.year);
+      
+      if (instantMovie) {
+        const processingTime = Date.now() - startTime;
+        
+        // Background: Update upload record (fire-and-forget)
+        if (upload) {
+          Promise.resolve(
+            supabaseAdmin
+              .from('user_uploads')
+              .update({
+                result_movie_id: instantMovie.id,
+                confidence_score: result.confidence,
+                matched_signals: { 
+                  signals: result.matchedSignals,
+                  reasoning: result.reasoning,
+                  actors_detected: result.actors,
+                },
+                processing_time_ms: processingTime,
+              })
+              .eq('id', upload.id)
+          ).catch(() => {});
+        }
+
+        if (queueSlotAcquired) {
+          recognitionQueue.releaseSlot(processingTime);
+        }
+
+        console.log(`\n⚡ INSTANT: "${instantMovie.title}" (${Math.round(result.confidence * 100)}%) [HIGH CONFIDENCE + CACHED]`);
+        console.log(`⏱️ Total time: ${processingTime}ms`);
+        console.log('========== FAST RECOGNITION END ==========\n');
+
+        return NextResponse.json({
+          movie: instantMovie,
+          confidence: result.confidence,
+          matched_on: result.matchedSignals,
+          reasoning: result.reasoning,
+          processing_time: processingTime,
+          actors_detected: result.actors,
+          cached: true,
+          instant: true,
+        });
+      }
     }
 
     // ========== STEP 5: SMART DB LOOKUP (Skip TMDB if cached) ==========
