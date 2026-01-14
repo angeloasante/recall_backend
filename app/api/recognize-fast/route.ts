@@ -131,11 +131,11 @@ export async function POST(req: NextRequest) {
     const videoSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
     console.log(`✓ Video: ${videoFile.name} (${videoSizeMB}MB)`);
 
-    // Create upload record
+    // Create upload record with placeholder video_url (column has NOT NULL constraint)
     const { data: upload, error: uploadError } = await supabaseAdmin
       .from('user_uploads')
       .insert({ 
-        video_url: null, // Not storing videos to save storage costs
+        video_url: 'processing', // Placeholder since we don't store videos
         user_id: userId || null,
       })
       .select()
