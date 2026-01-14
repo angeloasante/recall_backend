@@ -418,11 +418,15 @@ I've provided ${frames.length} frames from the video. Analyze them for:
 
 === CRITICAL IDENTIFICATION RULES ===
 
+**TRANSCRIPT IS MOST IMPORTANT**: The dialogue/transcript is the strongest signal. If it mentions specific plot points, settings, or unique terminology - PRIORITIZE THIS over uncertain visual identification.
+
 **IGNORE SOCIAL MEDIA WATERMARKS**: TikTok, Instagram, YouTube logos/handles are WHERE the clip is shared, NOT the source. Identify the ORIGINAL movie/TV show.
 
-**TRANSCRIPT TRUMPS UNCERTAIN ACTOR ID**: If the transcript CLEARLY describes a specific movie's plot, trust it over actor identifications that may be wrong. Face recognition can misidentify actors - the transcript is more reliable for distinctive plots.
+**BE VERY CAREFUL WITH 2024-2026 CONTENT**: Many new shows exist that you may not know well. If the transcript describes a unique plot (like sea creatures, aliens, specific scenarios), search your knowledge for 2024-2026 releases.
 
-**VERIFY ALL ACTORS**: If multiple actors are identified, the movie MUST contain ALL of them.
+**COMMON MISIDENTIFICATIONS TO AVOID**:
+- If transcript mentions "war", "land", "sea", "aquatic beings", "gills", "scales" = likely "The War Between the Land and the Sea" (2025), NOT Monarch or Aquaman
+- If monster/creature content, check if it matches a specific 2024-2026 release before defaulting to older shows
 
 **KEVIN HART + DWAYNE JOHNSON MOVIES (when BOTH are identified)**:
 - "Central Intelligence" (2016) - Comedy, CIA agent recruits old classmate
@@ -454,12 +458,27 @@ I've provided ${frames.length} frames from the video. Analyze them for:
 - "Blood Diamond" (2006) - Sierra Leone, conflict diamonds, Leonardo DiCaprio
 - "Hotel Rwanda" (2004) - Rwandan genocide, hotel manager saves refugees
 
+**SEA CREATURES / AQUATIC SCI-FI** (very important!):
+- "The War Between the Land and the Sea" (2025) - Doctor Who spinoff, UNIT, ancient sea species emerges from ocean, war between humans and aquatic beings, gills, scales, military response, Russell T Davies
+- "Aquaman" (2018, 2023) - DC superhero, underwater kingdom Atlantis, Jason Momoa
+- "The Shape of Water" (2017) - Mute woman falls for amphibian creature, 1960s lab, Guillermo del Toro
+- "Underwater" (2020) - Kristen Stewart, deep sea drilling, Lovecraftian creatures
+- "The Abyss" (1989) - Underwater aliens, deep sea oil rig
+
+**DOCTOR WHO UNIVERSE**:
+- "The War Between the Land and the Sea" (2025) - UNIT spinoff, sea creatures vs humanity, aquatic invasion
+- "Doctor Who" (2005-present) - Time Lord, TARDIS, various alien threats
+- "Torchwood" (2006-2011) - Cardiff, alien artifacts, Captain Jack
+
 **SCENE CONTEXT CLUES**:
 - Kevin Hart + Dwayne Johnson + comedy/action = "Central Intelligence" or "Jumanji"
 - Modern day + spy/CIA themes = "Central Intelligence" (2016)
 - Jungle/video game world = "Jumanji" films
 - AI chip + paralyzed protagonist + revenge = "Upgrade" (2018)
 - Child soldiers + African setting + Idris Elba = "Beasts of No Nation"
+- Aquatic creatures + gills + scales + war/invasion = "The War Between the Land and the Sea" (2025)
+- Sea creature + UNIT + military = "The War Between the Land and the Sea" (2025)
+- Underwater lab + creature + romance = "The Shape of Water" (2017)
 
 === YOUR TASK ===
 1. **TRANSCRIPT FIRST**: If transcript contains distinctive dialogue or plot elements, prioritize this
