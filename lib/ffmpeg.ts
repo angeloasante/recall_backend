@@ -84,7 +84,7 @@ export async function extractAudio(videoBuffer: Buffer): Promise<Buffer> {
 // Extracts frames evenly distributed across the entire video duration
 export async function extractFrames(
   videoBuffer: Buffer,
-  count: number = 10  // Default to 10 frames for better coverage
+  count: number = 2  // Default to 2 frames for speed
 ): Promise<Buffer[]> {
   const tempDir = join(tmpdir(), 'movie-mvp');
   await mkdir(tempDir, { recursive: true });
@@ -107,12 +107,9 @@ export async function extractFrames(
     startOffset + (usableDuration / (count + 1)) * (i + 1)
   );
 
-  const frames: Buffer[] = [];
-
-  for (const timestamp of timestamps) {
-    const frame = await extractFrameAtTime(inputPath, timestamp);
-    frames.push(frame);
-  }
+  // Extract frames in PARALLEL for speed
+  const framePromises = timestamps.map(timestamp => extractFrameAtTime(inputPath, timestamp));
+  const frames = await Promise.all(framePromises);
 
   // Cleanup
   await unlink(inputPath).catch(() => {});
@@ -131,7 +128,7 @@ function getVideoDuration(videoPath: string): Promise<number> {
 }
 
 // Extract a single frame at a specific timestamp
-// Using high quality settings for better actor recognition
+// Optimized for speed - smaller images work fine for AI recognition
 function extractFrameAtTime(videoPath: string, timestamp: number): Promise<Buffer> {
   const outputPath = join(tmpdir(), 'movie-mvp', `frame-${randomUUID()}.jpg`);
 
@@ -139,10 +136,10 @@ function extractFrameAtTime(videoPath: string, timestamp: number): Promise<Buffe
     ffmpeg(videoPath)
       .seekInput(timestamp)
       .frames(1)
-      // High quality output for better face recognition
+      // Optimized for speed - 720p is enough for AI recognition
       .outputOptions([
-        '-q:v', '2',           // High quality JPEG (1-31, lower is better)
-        '-vf', 'scale=1920:-1:flags=lanczos', // Scale to 1920px width, maintain aspect ratio
+        '-q:v', '4',           // Good quality JPEG (1-31, lower is better)
+        '-vf', 'scale=720:-1', // Scale to 720px width for speed
       ])
       .output(outputPath)
       .on('end', async () => {
