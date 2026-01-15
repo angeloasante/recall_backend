@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { recognizeMovieOneShot, transcribeAudioGemini, isGeminiAvailable } from '@/lib/gemini';
+import { recognizeFromDialogue, transcribeAudioGemini, isGeminiAvailable } from '@/lib/gemini';
 
 // Route segment config
 export const dynamic = 'force-dynamic';
@@ -170,13 +170,15 @@ export async function POST(req: NextRequest) {
     console.log('🎬 Step 2: Recognizing movie from dialogue...');
     const recognizeStart = Date.now();
 
-    // Use ONE-SHOT recognition with audio-only mode (no frames)
-    const recognition = await recognizeMovieOneShot([], transcript);
+    // Use dedicated audio-only recognition (optimized for dialogue)
+    const recognition = await recognizeFromDialogue(transcript);
     console.log(`  ✓ Recognition in ${Date.now() - recognizeStart}ms`);
     console.log(`  🎯 Result: "${recognition.title}" (${recognition.year}) - ${recognition.confidence}%`);
+    console.log(`  📝 Reasoning: ${recognition.reasoning}`);
 
     if (!recognition.title || recognition.title.toLowerCase() === 'unknown' || recognition.confidence < 50) {
       console.log(`  ❌ Low confidence recognition`);
+      return NextResponse.json({
       return NextResponse.json({
         success: false,
         error: 'Could not identify movie',

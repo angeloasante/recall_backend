@@ -375,6 +375,138 @@ export async function analyzeFrameComplete(frameBase64: string): Promise<{
 }
 
 /**
+ * AUDIO-ONLY Movie Recognition - Identify movie from dialogue transcript only
+ * Used for Shazam-like listening mode where we only have audio
+ */
+export async function recognizeFromDialogue(transcript: string): Promise<{
+  title: string;
+  year: number | null;
+  confidence: number;
+  reasoning: string;
+  alternativeTitles: Array<{ title: string; year: number; confidence: number }>;
+}> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY not configured');
+  }
+
+  const prompt = `You are an expert movie and TV show identifier. I'm giving you a transcript of dialogue from a movie or TV show. Your job is to identify what movie/show this is from.
+
+=== DIALOGUE TRANSCRIPT ===
+"${transcript}"
+
+=== IDENTIFICATION GUIDE ===
+
+**SCI-FI / TECH THRILLERS** (match by key phrases):
+- "STEM", "chip in spine", "paralysis", "body as weapon", "AI controlling body", "self-driving car accident", "predict moves" → **"Upgrade" (2018)** - Logan Marshall-Green, AI implant revenge thriller
+- "replicant", "baseline test", "cells interlinked" → **"Blade Runner 2049" (2017)**
+- "Turing test", "Ava", "consciousness" → **"Ex Machina" (2014)**
+- "M3GAN", "Gemma", "robot doll" → **"M3GAN" (2022)**
+- "Samantha", "OS", "falling in love with AI" → **"Her" (2013)**
+
+**ACTION / SUPERHERO**:
+- Kevin Hart + Dwayne Johnson + CIA/spy comedy → **"Central Intelligence" (2016)**
+- Kevin Hart + Dwayne Johnson + jungle/video game → **"Jumanji: Welcome to the Jungle" (2017)** or "The Next Level" (2019)
+- "I am Groot", "Guardians" → **"Guardians of the Galaxy"** films
+- "Avengers assemble", "I am Iron Man" → **MCU films**
+
+**WAR / DRAMA**:
+- Child soldiers, African war, commandant → **"Beasts of No Nation" (2015)**
+- "Blood diamond", Sierra Leone → **"Blood Diamond" (2006)**
+- "Hotel Rwanda", genocide → **"Hotel Rwanda" (2004)**
+
+**SEA CREATURES / AQUATIC**:
+- UNIT, sea creatures, gills, ancient species, war with land → **"The War Between the Land and the Sea" (2025)** (Doctor Who spinoff)
+- Atlantis, Aquaman, underwater kingdom → **"Aquaman"** films
+- Creature + lab + romance + mute woman → **"The Shape of Water" (2017)**
+
+**COMEDY**:
+- "Calvin", "Maggie", therapy, self-help book → **"Think Like a Man" (2012)** or **"The Wedding Ringer" (2015)** - check context
+- "therapeutic process", couples therapy → Could be various rom-coms
+
+**TV SHOWS**:
+- "Winter is coming", "Stark", dragons → **"Game of Thrones"**
+- "I am the one who knocks", meth → **"Breaking Bad"**
+- "This is the way", Mandalorian → **"The Mandalorian"**
+
+=== IMPORTANT ===
+- Focus on DISTINCTIVE phrases, character names, plot elements
+- The transcript: "${transcript.substring(0, 100)}..." 
+- Look for unique terminology that only appears in one movie
+
+=== RESPOND WITH JSON ONLY ===
+{
+  "title": "Movie or TV Show Title",
+  "year": 2024,
+  "confidence": 0.5-1.0 (be conservative - only >0.7 if very sure),
+  "reasoning": "Explain EXACTLY which phrases/elements matched and why",
+  "alternativeTitles": [
+    {"title": "Second guess", "year": 2023, "confidence": 0.4},
+    {"title": "Third guess", "year": 2022, "confidence": 0.3}
+  ]
+}
+
+If you truly cannot identify it, return title "Unknown" with confidence 0.3.`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const response = await fetch(
+      `${GEMINI_BASE_URL}/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 1024,
+          },
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    clearTimeout(timeoutId);
+    const data: GeminiResponse = await response.json();
+    
+    if (data.error) {
+      throw new Error(data.error.message);
+    }
+
+    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    console.log('  🤖 Gemini raw response:', resultText.substring(0, 500));
+    
+    const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in Gemini response');
+    }
+    
+    const result = JSON.parse(jsonMatch[0]);
+    
+    return {
+      title: result.title || 'Unknown',
+      year: result.year || null,
+      confidence: Math.round((result.confidence || 0.3) * 100), // Convert to percentage
+      reasoning: result.reasoning || 'No reasoning provided',
+      alternativeTitles: result.alternativeTitles || [],
+    };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Gemini audio recognition timed out');
+    }
+    throw error;
+  }
+}
+
+/**
  * ONE-SHOT Movie Recognition - Everything in ONE Gemini Call
  * Analyzes frames, audio transcript, and identifies the movie all at once
  * This is MUCH faster than multiple separate API calls
