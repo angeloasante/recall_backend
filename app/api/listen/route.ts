@@ -221,9 +221,9 @@ export async function POST(req: NextRequest) {
         const { data: upload, error } = await supabaseAdmin
           .from('user_uploads')
           .insert({
-            video_url: 'audio-listen',
             user_id: userId,
-            movie_id: dbMovie.id,
+            result_movie_id: dbMovie.id,
+            confidence_score: recognition.confidence / 100, // Store as decimal 0-1
           })
           .select()
           .single();
@@ -250,14 +250,14 @@ export async function POST(req: NextRequest) {
         title: movie.title,
         year: movie.year,
         overview: movie.overview,
-        poster_path: movie.poster_path || null,
-        backdrop_path: movie.backdrop_path || null,
+        poster_url: movie.poster_url || null,
+        backdrop_url: movie.backdrop_url || null,
         vote_average: movie.vote_average || null,
         is_tv: movie.is_tv || false,
         genres: movie.genres || [],
       },
       recognition: {
-        confidence: recognition.confidence,
+        confidence: recognition.confidence, // Already a percentage (0-100)
         reasoning: recognition.reasoning,
         transcript: transcript.substring(0, 300),
         alternatives: recognition.alternativeTitles || [],
