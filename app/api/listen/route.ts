@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
         title: recognition.title,
         year: recognition.year,
         overview: recognition.reasoning || '',
-        is_tv: recognition.isTV || false,
+        is_tv: false,
       };
     }
 
@@ -259,7 +259,7 @@ export async function POST(req: NextRequest) {
         confidence: recognition.confidence,
         reasoning: recognition.reasoning,
         transcript: transcript.substring(0, 300),
-        alternatives: recognition.alternatives || [],
+        alternatives: recognition.alternativeTitles || [],
       },
       similar_movies: similarMovies,
       processing_time_ms: totalTime,
