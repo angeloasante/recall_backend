@@ -179,7 +179,6 @@ export async function POST(req: NextRequest) {
     if (!recognition.title || recognition.title.toLowerCase() === 'unknown' || recognition.confidence < 50) {
       console.log(`  ❌ Low confidence recognition`);
       return NextResponse.json({
-      return NextResponse.json({
         success: false,
         error: 'Could not identify movie',
         message: 'Try a scene with more distinctive dialogue',
