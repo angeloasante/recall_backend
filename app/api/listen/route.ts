@@ -183,7 +183,7 @@ export async function POST(req: NextRequest) {
         success: false,
         error: 'Could not identify movie',
         message: 'Try a scene with more distinctive dialogue',
-        transcript: transcript.substring(0, 200),
+        transcript: transcript, // Full transcript for debugging
         processingTime: Date.now() - startTime
       }, { status: 200 }); // Return 200 but success: false
     }
