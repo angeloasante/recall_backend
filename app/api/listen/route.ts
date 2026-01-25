@@ -287,7 +287,7 @@ export async function POST(req: NextRequest) {
       recognition: {
         confidence: recognition.confidence, // Already a percentage (0-100)
         reasoning: recognition.reasoning,
-        transcript: transcript.substring(0, 300),
+        transcript: transcript, // Full transcript
         alternatives: recognition.alternativeTitles || [],
       },
       similar_movies: similarMovies,
