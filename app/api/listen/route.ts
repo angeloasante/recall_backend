@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { recognizeFromDialogue, transcribeAudioGemini, isGeminiAvailable } from '@/lib/gemini';
+import { searchMovie, buildImageUrl } from '@/lib/tmdb';
 
 // Route segment config
 export const dynamic = 'force-dynamic';
@@ -195,8 +196,12 @@ export async function POST(req: NextRequest) {
     let similarMovies: any[] = [];
 
     if (dbMovie) {
-      console.log(`  ✓ Found in DB: "${dbMovie.title}" (ID: ${dbMovie.id})`);
-      movie = dbMovie;
+      console.log(`  ✓ Found in DB: "${dbMovie.title}" (Internal ID: ${dbMovie.id}, TMDB ID: ${dbMovie.tmdb_id})`);
+      // IMPORTANT: Use tmdb_id for deep linking, NOT internal id
+      movie = {
+        ...dbMovie,
+        id: dbMovie.tmdb_id || dbMovie.id, // Prefer TMDB ID for deep linking
+      };
       
       // Get cached similar movies
       similarMovies = await getCachedSimilarMovies(dbMovie.id);
@@ -204,14 +209,37 @@ export async function POST(req: NextRequest) {
         console.log(`  ✓ Loaded ${similarMovies.length} cached similar movies`);
       }
     } else {
-      // Return basic info if not in DB
-      console.log(`  ⚠️ Not in DB, returning basic info`);
-      movie = {
-        title: recognition.title,
-        year: recognition.year,
-        overview: recognition.reasoning || '',
-        is_tv: false,
-      };
+      // Not in DB - look up in TMDB to get the ID for deep linking
+      console.log(`  ⚠️ Not in DB, searching TMDB...`);
+      const tmdbMovie = await searchMovie(recognition.title, recognition.year);
+      
+      if (tmdbMovie) {
+        console.log(`  ✓ Found in TMDB: ID ${tmdbMovie.id}`);
+        const tmdbAny = tmdbMovie as any; // Full details include extra fields
+        movie = {
+          id: tmdbMovie.id, // TMDB ID for deep linking
+          title: tmdbMovie.title || recognition.title,
+          year: tmdbMovie.release_date ? parseInt(tmdbMovie.release_date.split('-')[0]) : recognition.year,
+          overview: tmdbMovie.overview || recognition.reasoning || '',
+          poster_url: buildImageUrl(tmdbMovie.poster_path, 'w500'),
+          backdrop_url: buildImageUrl(tmdbMovie.backdrop_path, 'w1280'),
+          vote_average: tmdbAny.vote_average ?? null,
+          is_tv: false,
+          genres: Array.isArray(tmdbAny.genres) 
+            ? tmdbAny.genres.map((g: any) => g.name) 
+            : [],
+        };
+      } else {
+        // Last resort: return basic info without ID
+        console.log(`  ❌ Not found in TMDB either`);
+        movie = {
+          id: null,
+          title: recognition.title,
+          year: recognition.year,
+          overview: recognition.reasoning || '',
+          is_tv: false,
+        };
+      }
     }
 
     // ========== STEP 4: Save Recognition Record ==========

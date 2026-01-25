@@ -428,6 +428,17 @@ export async function recognizeFromDialogue(transcript: string): Promise<{
 - "I am the one who knocks", meth → **"Breaking Bad"**
 - "This is the way", Mandalorian → **"The Mandalorian"**
 
+**TV THEME SONGS / INTROS** (VERY IMPORTANT - these are iconic):
+- "It seems today that all you see is violence in movies and sex on TV", "But where are those good old-fashioned values", "on which we used to rely", "Lucky there's a family guy" → **"Family Guy" (1999)** - Animated comedy by Seth MacFarlane
+- "So no one told you life was gonna be this way", "I'll be there for you" → **"Friends" (1994)**
+- "In West Philadelphia born and raised", "on the playground" → **"The Fresh Prince of Bel-Air" (1990)**
+- "Making your way in the world today", "Cheers" → **"Cheers" (1982)**
+- "I wanna be the very best", "Pokemon" → **"Pokémon" (1997)**
+- "Teenage Mutant Ninja Turtles", "heroes in a half shell" → **"TMNT"**
+- "Who lives in a pineapple under the sea", "SpongeBob SquarePants" → **"SpongeBob SquarePants" (1999)**
+- "Simpsons", "D'oh", "Homer", "Bart", "Springfield" → **"The Simpsons" (1989)**
+- "Office", "Dunder Mifflin", "That's what she said", "Michael Scott" → **"The Office" (2005)**
+
 === IMPORTANT ===
 - Focus on DISTINCTIVE phrases, character names, plot elements
 - The transcript: "${transcript.substring(0, 100)}..." 
