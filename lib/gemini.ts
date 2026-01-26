@@ -47,6 +47,25 @@ export async function transcribeAudioGemini(audioBuffer: Buffer): Promise<string
 
   const audioBase64 = audioBuffer.toString('base64');
   
+  // Detect audio format from buffer header
+  let mimeType = 'audio/mp4'; // Default for m4a/aac
+  
+  // Check for WAV header (RIFF....WAVE)
+  if (audioBuffer[0] === 0x52 && audioBuffer[1] === 0x49 && audioBuffer[2] === 0x46 && audioBuffer[3] === 0x46) {
+    mimeType = 'audio/wav';
+  }
+  // Check for MP3 header (ID3 or 0xFF 0xFB)
+  else if ((audioBuffer[0] === 0x49 && audioBuffer[1] === 0x44 && audioBuffer[2] === 0x33) ||
+           (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0)) {
+    mimeType = 'audio/mp3';
+  }
+  // Check for ftyp (MP4/M4A container)
+  else if (audioBuffer[4] === 0x66 && audioBuffer[5] === 0x74 && audioBuffer[6] === 0x79 && audioBuffer[7] === 0x70) {
+    mimeType = 'audio/mp4';
+  }
+  
+  console.log(`  🎵 Audio format detected: ${mimeType} (${(audioBuffer.length / 1024).toFixed(1)}KB)`);
+  
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
 
@@ -64,12 +83,21 @@ export async function transcribeAudioGemini(audioBuffer: Buffer): Promise<string
               parts: [
                 {
                   inline_data: {
-                    mime_type: 'audio/wav',
+                    mime_type: mimeType,
                     data: audioBase64,
                   },
                 },
                 {
-                  text: 'Transcribe this audio clip. Return ONLY the transcribed text, nothing else. If you hear dialogue from a movie or TV show, include it exactly as spoken.',
+                  text: `Transcribe this audio clip carefully. Listen for ANY spoken words, dialogue, music lyrics, or recognizable sounds.
+
+IMPORTANT: This audio may be recorded from a phone's microphone picking up TV/movie audio playing through speakers, so quality may not be perfect.
+
+Return ONLY the transcribed text - exactly what you hear being said. If you hear:
+- Movie/TV dialogue, transcribe it exactly
+- Song lyrics, transcribe them
+- Any spoken words at all, include them
+
+If you cannot hear any clear speech, return an empty string. Do not say "I cannot transcribe" - just return empty.`,
                 },
               ],
             },
