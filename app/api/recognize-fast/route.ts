@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { extractAudio, extractFrames } from '@/lib/ffmpeg';
+import { extractAudio, extractFrames, trimVideo } from '@/lib/ffmpeg';
 import { uploadVideo } from '@/lib/storage';
 import { searchMulti, buildImageUrl, TMDBTVShow, verifyActorsInMovie, findMoviesWithActors } from '@/lib/tmdb';
 import { recognizeMovieOneShot, transcribeAudioGemini, isGeminiAvailable } from '@/lib/gemini';
@@ -88,15 +88,44 @@ async function findMovieInDatabase(title: string, year?: number | null): Promise
   return null;
 }
 
+// Handle CORS preflight
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   let queueSlotAcquired = false;
   
   console.log('\n========== FAST RECOGNITION START ==========');
+  console.log(`  📅 Timestamp: ${new Date().toISOString()}`);
+  console.log(`  🔗 Request URL: ${req.url}`);
+  
+  // Detailed request logging for debugging upload issues
+  const contentType = req.headers.get('content-type') || 'none';
+  const contentLength = req.headers.get('content-length') || 'unknown';
+  const userAgent = req.headers.get('user-agent') || 'unknown';
+  const forwardedFor = req.headers.get('x-forwarded-for') || 'direct';
+  const cfRay = req.headers.get('cf-ray') || 'none'; // Cloudflare request ID
+  const cfConnectingIp = req.headers.get('cf-connecting-ip') || forwardedFor;
+  
+  console.log(`  📋 Content-Type: ${contentType}`);
+  console.log(`  📋 Content-Length: ${contentLength} bytes (${(parseInt(contentLength || '0') / 1024 / 1024).toFixed(2)} MB)`);
+  console.log(`  📋 User-Agent: ${userAgent.substring(0, 100)}`);
+  console.log(`  📋 Client IP: ${cfConnectingIp}`);
+  console.log(`  📋 CF-Ray: ${cfRay}`);
 
   try {
     // Check Gemini availability
     if (!isGeminiAvailable()) {
+      console.log('  ❌ Gemini not available');
       return NextResponse.json({ 
         error: 'Gemini API not configured',
         message: 'Fast recognition requires Gemini API key' 
@@ -118,18 +147,107 @@ export async function POST(req: NextRequest) {
 
     // ========== STEP 1: Parse Video ==========
     console.log('📥 Step 1: Parsing video...');
-    const formData = await req.formData();
+    
+    // Parse FormData with explicit error handling and detailed diagnostics
+    let formData: FormData;
+    const parseStartTime = Date.now();
+    try {
+      formData = await req.formData();
+      const parseTime = Date.now() - parseStartTime;
+      console.log(`  ✓ FormData parsed in ${parseTime}ms`);
+    } catch (parseError: any) {
+      recognitionQueue.releaseSlot();
+      const parseTime = Date.now() - parseStartTime;
+      
+      // Detailed error logging for debugging
+      console.error('  ❌ FORMDATA PARSE FAILURE');
+      console.error(`  ❌ Parse time before failure: ${parseTime}ms`);
+      console.error(`  ❌ Error name: ${parseError.name}`);
+      console.error(`  ❌ Error message: ${parseError.message}`);
+      console.error(`  ❌ Error code: ${parseError.code || 'none'}`);
+      console.error(`  ❌ Content-Type: ${contentType}`);
+      console.error(`  ❌ Content-Length: ${contentLength}`);
+      console.error(`  ❌ User-Agent: ${userAgent}`);
+      console.error(`  ❌ Client IP: ${cfConnectingIp}`);
+      
+      // Check for specific error patterns
+      const errorMsg = parseError.message?.toLowerCase() || '';
+      let userMessage = 'The video upload may have been corrupted in transit.';
+      let errorCode = 'FORMDATA_PARSE_ERROR';
+      
+      if (errorMsg.includes('unexpected end') || errorMsg.includes('premature')) {
+        userMessage = 'Upload was interrupted. Please check your connection and try again.';
+        errorCode = 'UPLOAD_INTERRUPTED';
+      } else if (errorMsg.includes('too large') || errorMsg.includes('payload')) {
+        userMessage = 'Video file is too large. Please try a shorter clip.';
+        errorCode = 'FILE_TOO_LARGE';
+      } else if (errorMsg.includes('timeout')) {
+        userMessage = 'Upload timed out. Please try on a faster connection.';
+        errorCode = 'UPLOAD_TIMEOUT';
+      }
+      
+      console.error(`  ❌ Error code: ${errorCode}`);
+      console.error(`  ❌ This usually means the request body was corrupted in transit (cellular/slow networks)`);
+      
+      return NextResponse.json({ 
+        error: 'Failed to parse request body',
+        details: userMessage,
+        code: errorCode,
+        technical: parseError.message,
+        debug: {
+          contentType,
+          contentLength,
+          parseTimeMs: parseTime,
+          clientIp: cfConnectingIp,
+        },
+      }, { status: 400 });
+    }
+    
     const videoFile = formData.get('video') as File;
     const userId = formData.get('user_id') as string | null;
+    const trimStartStr = formData.get('trimStart') as string | null;
+    const trimEndStr = formData.get('trimEnd') as string | null;
 
     if (!videoFile) {
       recognitionQueue.releaseSlot();
       return NextResponse.json({ error: 'No video file provided' }, { status: 400 });
     }
 
-    const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
+    let videoBuffer: Buffer | null = Buffer.from(await videoFile.arrayBuffer());
+    const originalSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+    console.log(`✓ Video: ${videoFile.name} (${originalSizeMB}MB)`);
+    
+    // Handle trimming if timestamps provided
+    if (trimStartStr && trimEndStr) {
+      const trimStart = parseFloat(trimStartStr);
+      const trimEnd = parseFloat(trimEndStr);
+      
+      if (!isNaN(trimStart) && !isNaN(trimEnd) && trimEnd > trimStart) {
+        console.log(`📎 Trim requested: ${trimStart.toFixed(1)}s - ${trimEnd.toFixed(1)}s`);
+        
+        try {
+          videoBuffer = await trimVideo(videoBuffer, trimStart, trimEnd);
+          const trimmedSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+          console.log(`✓ Video trimmed: ${originalSizeMB}MB → ${trimmedSizeMB}MB`);
+        } catch (trimError: any) {
+          console.warn(`⚠️ Trim failed, using original: ${trimError.message}`);
+          // Continue with original video if trimming fails
+        }
+      }
+    }
+    
     const videoSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-    console.log(`✓ Video: ${videoFile.name} (${videoSizeMB}MB)`);
+    
+    // Reject videos over 50MB to prevent OOM
+    if (videoBuffer.length > 50 * 1024 * 1024) {
+      recognitionQueue.releaseSlot();
+      console.log(`  ❌ Video too large: ${videoSizeMB}MB (max 50MB)`);
+      return NextResponse.json({ 
+        error: 'Video too large',
+        details: 'Please upload a video under 50MB. Try trimming the clip shorter.',
+        code: 'FILE_TOO_LARGE',
+      }, { status: 400 });
+    }
 
     // Create upload record with placeholder video_url (column has NOT NULL constraint)
     const { data: upload, error: uploadError } = await supabaseAdmin
@@ -156,17 +274,32 @@ export async function POST(req: NextRequest) {
     //   })
     //   .catch(() => {});
 
-    // ========== STEP 2: Extract Features (Parallel) ==========
-    console.log('📥 Step 2: Extracting frames & audio...');
+    // ========== STEP 2: Extract Features (SEQUENTIAL to save memory) ==========
+    // Processing in parallel uses too much memory on Railway's 512MB limit
+    console.log('📥 Step 2: Extracting frames & audio (sequential for memory)...');
     const extractStart = Date.now();
     
-    const [audioResult, framesResult] = await Promise.allSettled([
-      extractAudio(videoBuffer),
-      extractFrames(videoBuffer, 2), // Only 2 frames (start + middle) for speed
-    ]);
-
-    const audioBuffer = audioResult.status === 'fulfilled' ? audioResult.value : null;
-    const frames = framesResult.status === 'fulfilled' ? framesResult.value : [];
+    // Extract audio first
+    let audioBuffer: Buffer | null = null;
+    try {
+      audioBuffer = await extractAudio(videoBuffer!);
+      console.log(`  ✓ Audio extracted: ${(audioBuffer.length / 1024).toFixed(0)}KB`);
+    } catch (err: any) {
+      console.log(`  ⚠️ Audio extraction failed: ${err.message}`);
+    }
+    
+    // Extract frames (use fresh buffer reference to help GC)
+    let frames: Buffer[] = [];
+    try {
+      frames = await extractFrames(videoBuffer!, 2); // Only 2 frames for speed
+      console.log(`  ✓ Frames extracted: ${frames.length}`);
+    } catch (err: any) {
+      console.log(`  ⚠️ Frame extraction failed: ${err.message}`);
+    }
+    
+    // IMPORTANT: Clear video buffer reference to help garbage collection
+    videoBuffer = null;
+    if (global.gc) global.gc(); // Force GC if available
     
     console.log(`  ✓ Extracted in ${Date.now() - extractStart}ms: ${frames.length} frames, ${audioBuffer ? 'audio ready' : 'no audio'}`);
 
@@ -487,10 +620,22 @@ export async function POST(req: NextRequest) {
       recognitionQueue.releaseSlot(Date.now() - startTime);
     }
     
-    console.error('❌ Fast recognition error:', error);
+    const errorMessage = error?.message || 'Unknown error';
+    const errorStack = error?.stack || '';
+    
+    console.error('❌ Fast recognition error:', errorMessage);
+    console.error('❌ Error stack:', errorStack);
+    console.error('❌ Error type:', error?.constructor?.name);
     console.log('========== FAST RECOGNITION END (ERROR) ==========\n');
+    
+    // More descriptive error response
     return NextResponse.json(
-      { error: 'Recognition failed', details: error.message },
+      { 
+        error: 'Recognition failed', 
+        details: errorMessage,
+        type: error?.constructor?.name || 'Error',
+        timestamp: new Date().toISOString(),
+      },
       { status: 500 }
     );
   }

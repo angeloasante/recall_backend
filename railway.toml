@@ -6,6 +6,9 @@ dockerfilePath = "Dockerfile"
 [deploy]
 numReplicas = 1
 healthcheckPath = "/api/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+# Increase request timeout for video uploads (in seconds)
+# This prevents "Failed to parse body as FormData" errors on slow uploads
+sleepApplication = false

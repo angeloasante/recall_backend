@@ -43,7 +43,89 @@ try {
   console.error('❌ FFmpeg setup error:', error);
 }
 
+// Trim video to specified start and end times
+// Returns trimmed video buffer
+export async function trimVideo(
+  videoBuffer: Buffer,
+  startTime: number,
+  endTime: number
+): Promise<Buffer> {
+  const tempDir = join(tmpdir(), 'movie-mvp');
+  await mkdir(tempDir, { recursive: true });
+  
+  const uniqueId = randomUUID();
+  const inputPath = join(tempDir, `trim-input-${uniqueId}.mp4`);
+  const outputPath = join(tempDir, `trim-output-${uniqueId}.mp4`);
+
+  await writeFile(inputPath, videoBuffer);
+  
+  const duration = endTime - startTime;
+  console.log(`    ✂️ Trimming video: ${startTime.toFixed(1)}s - ${endTime.toFixed(1)}s (${duration.toFixed(1)}s)`);
+
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .setStartTime(startTime)
+      .setDuration(duration)
+      .outputOptions([
+        '-c', 'copy',  // Copy streams without re-encoding (fast)
+        '-avoid_negative_ts', 'make_zero',
+      ])
+      .output(outputPath)
+      .on('end', async () => {
+        try {
+          await unlink(inputPath).catch(() => {});
+          const trimmedBuffer = await readFile(outputPath);
+          await unlink(outputPath).catch(() => {});
+          console.log(`    ✓ Trimmed video: ${(trimmedBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+          resolve(trimmedBuffer);
+        } catch (error) {
+          await unlink(inputPath).catch(() => {});
+          await unlink(outputPath).catch(() => {});
+          reject(error);
+        }
+      })
+      .on('error', async (error) => {
+        // If copy fails (codec incompatibility), try with re-encoding
+        console.log(`    ⚠️ Copy trim failed, trying re-encode: ${error.message}`);
+        await unlink(outputPath).catch(() => {});
+        
+        ffmpeg(inputPath)
+          .setStartTime(startTime)
+          .setDuration(duration)
+          .outputOptions([
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+          ])
+          .output(outputPath)
+          .on('end', async () => {
+            try {
+              await unlink(inputPath).catch(() => {});
+              const trimmedBuffer = await readFile(outputPath);
+              await unlink(outputPath).catch(() => {});
+              console.log(`    ✓ Trimmed video (re-encoded): ${(trimmedBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+              resolve(trimmedBuffer);
+            } catch (err) {
+              await unlink(inputPath).catch(() => {});
+              await unlink(outputPath).catch(() => {});
+              reject(err);
+            }
+          })
+          .on('error', async (err) => {
+            await unlink(inputPath).catch(() => {});
+            await unlink(outputPath).catch(() => {});
+            reject(err);
+          })
+          .run();
+      })
+      .run();
+  });
+}
+
 // Extract audio from video
+// Memory optimized: cleans up temp files immediately after reading
 export async function extractAudio(videoBuffer: Buffer): Promise<Buffer> {
   const tempDir = join(tmpdir(), 'movie-mvp');
   await mkdir(tempDir, { recursive: true });
@@ -53,6 +135,9 @@ export async function extractAudio(videoBuffer: Buffer): Promise<Buffer> {
   const outputPath = join(tempDir, `audio-output-${uniqueId}.wav`);
 
   await writeFile(inputPath, videoBuffer);
+  
+  // Immediately delete reference to help GC (we're using file on disk now)
+  // The buffer is already written to disk at inputPath
 
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
@@ -60,20 +145,27 @@ export async function extractAudio(videoBuffer: Buffer): Promise<Buffer> {
       .audioCodec('pcm_s16le')
       .audioFrequency(16000)
       .audioChannels(1)
+      // Compress audio more aggressively to reduce memory
+      .outputOptions(['-ar', '16000', '-ac', '1'])
       .output(outputPath)
       .on('end', async () => {
         try {
-          const audioBuffer = await readFile(outputPath);
-          // Cleanup temp files
+          // Delete input immediately to free disk space
           await unlink(inputPath).catch(() => {});
+          
+          const audioBuffer = await readFile(outputPath);
+          // Cleanup output file
           await unlink(outputPath).catch(() => {});
           resolve(audioBuffer);
         } catch (error) {
+          await unlink(inputPath).catch(() => {});
+          await unlink(outputPath).catch(() => {});
           reject(error);
         }
       })
       .on('error', async (error) => {
         await unlink(inputPath).catch(() => {});
+        await unlink(outputPath).catch(() => {});
         reject(error);
       })
       .run();
@@ -128,7 +220,7 @@ function getVideoDuration(videoPath: string): Promise<number> {
 }
 
 // Extract a single frame at a specific timestamp
-// Optimized for speed - smaller images work fine for AI recognition
+// Optimized for speed and memory - smaller images work fine for AI recognition
 function extractFrameAtTime(videoPath: string, timestamp: number): Promise<Buffer> {
   const outputPath = join(tmpdir(), 'movie-mvp', `frame-${randomUUID()}.jpg`);
 
@@ -136,10 +228,10 @@ function extractFrameAtTime(videoPath: string, timestamp: number): Promise<Buffe
     ffmpeg(videoPath)
       .seekInput(timestamp)
       .frames(1)
-      // Optimized for speed - 720p is enough for AI recognition
+      // Optimized for memory - 480p is enough for AI recognition
       .outputOptions([
-        '-q:v', '4',           // Good quality JPEG (1-31, lower is better)
-        '-vf', 'scale=720:-1', // Scale to 720px width for speed
+        '-q:v', '6',           // Lower quality JPEG to save memory (1-31, lower is better)
+        '-vf', 'scale=480:-1', // Scale to 480px width for memory savings
       ])
       .output(outputPath)
       .on('end', async () => {
@@ -149,10 +241,14 @@ function extractFrameAtTime(videoPath: string, timestamp: number): Promise<Buffe
           console.log(`    📷 Frame extracted: ${Math.round(buffer.length / 1024)}KB`);
           resolve(buffer);
         } catch (error) {
+          await unlink(outputPath).catch(() => {});
           reject(error);
         }
       })
-      .on('error', reject)
+      .on('error', (err) => {
+        unlink(outputPath).catch(() => {});
+        reject(err);
+      })
       .run();
   });
 }

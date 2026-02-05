@@ -71,7 +71,7 @@ export async function transcribeAudioGemini(audioBuffer: Buffer): Promise<string
 
   try {
     const response = await fetch(
-      `${GEMINI_BASE_URL}/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `${GEMINI_BASE_URL}/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: {
@@ -130,12 +130,12 @@ If you cannot hear any clear speech, return an empty string. Do not say "I canno
 
 /**
  * Analyze image with Gemini Flash
- * Using gemini-2.0-flash (stable) - has higher quota than experimental
+ * Using gemini-3-flash-preview (stable) - has higher quota than experimental
  */
 async function analyzeWithGemini(
   imageBase64: string,
   prompt: string,
-  model: string = 'gemini-2.0-flash'
+  model: string = 'gemini-3-flash-preview'
 ): Promise<string> {
   if (!GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY not configured');
@@ -491,7 +491,7 @@ If you truly cannot identify it, return title "Unknown" with confidence 0.3.`;
 
   try {
     const response = await fetch(
-      `${GEMINI_BASE_URL}/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `${GEMINI_BASE_URL}/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: {
@@ -681,7 +681,7 @@ If you cannot identify the movie with any confidence, use title "Unknown" and co
 
   try {
     const response = await fetch(
-      `${GEMINI_BASE_URL}/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `${GEMINI_BASE_URL}/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: {

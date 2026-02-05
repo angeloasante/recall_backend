@@ -38,6 +38,8 @@ EXPOSE 3000
 # Set environment
 ENV NODE_ENV=production
 ENV PORT=3000
+# Limit Node.js memory to prevent OOM kills on Railway
+ENV NODE_OPTIONS="--max-old-space-size=450"
 
 # Start the server
 CMD ["npm", "start"]

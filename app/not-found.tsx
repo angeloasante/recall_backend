@@ -1,13 +1,14 @@
+// Minimal 404 page - avoid Server Actions issues
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export default function NotFound() {
   return (
-    <div style={{ padding: '20px', fontFamily: 'system-ui' }}>
-      <h1>404 - Not Found</h1>
-      <p>This is the Movie MVP API server.</p>
-      <p>Available endpoints:</p>
-      <ul>
-        <li><code>POST /api/recognize</code> - Video recognition</li>
-        <li><code>GET /api/health</code> - Health check</li>
-      </ul>
-    </div>
+    <html>
+      <body style={{ backgroundColor: '#111827', color: 'white', fontFamily: 'system-ui', padding: '40px' }}>
+        <h1>404 - Not Found</h1>
+        <p>Reckall API - use /api/* endpoints</p>
+      </body>
+    </html>
   );
 }

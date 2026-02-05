@@ -1,19 +1,11 @@
-import './globals.css';
-import type { Metadata } from 'next';
-
-export const metadata: Metadata = {
-  title: 'Movie MVP API',
-  description: 'Movie recognition backend service',
-};
+// Minimal layout - avoid Server Actions issues
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
-  );
+  return children;
 }
