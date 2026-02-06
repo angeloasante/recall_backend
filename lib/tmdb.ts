@@ -100,6 +100,75 @@ export async function getTVShowCast(tmdbId: number): Promise<any[]> {
   return data.cast?.slice(0, 15) || []; // Top 15 cast members for TV
 }
 
+// Watch provider types
+export interface WatchProvider {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string;
+  display_priority: number;
+}
+
+export interface WatchProviders {
+  flatrate?: WatchProvider[];  // Subscription services (Netflix, Disney+, etc.)
+  rent?: WatchProvider[];       // Rental options
+  buy?: WatchProvider[];        // Purchase options
+  free?: WatchProvider[];       // Free with ads
+  ads?: WatchProvider[];        // Free with ads (alternate key)
+  link?: string;                // JustWatch attribution link
+}
+
+/**
+ * Get watch providers for a movie or TV show from TMDB
+ * This returns REAL streaming data, not AI-generated
+ */
+export async function getWatchProviders(
+  tmdbId: number,
+  mediaType: 'movie' | 'tv' = 'movie',
+  country: string = 'US'
+): Promise<WatchProviders | null> {
+  const apiKey = process.env.TMDB_API_KEY;
+  
+  try {
+    const response = await fetch(
+      `${TMDB_BASE_URL}/${mediaType}/${tmdbId}/watch/providers?api_key=${apiKey}`
+    );
+    
+    if (!response.ok) {
+      console.error(`TMDB watch providers error: ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    // Get providers for specified country (default: US)
+    const countryData = data.results?.[country];
+    
+    if (!countryData) {
+      console.log(`No watch providers found for ${mediaType} ${tmdbId} in ${country}`);
+      return null;
+    }
+    
+    return {
+      flatrate: countryData.flatrate || [],
+      rent: countryData.rent || [],
+      buy: countryData.buy || [],
+      free: countryData.free || countryData.ads || [],
+      link: countryData.link || null,
+    };
+  } catch (error) {
+    console.error('Failed to fetch watch providers:', error);
+    return null;
+  }
+}
+
+/**
+ * Build full logo URL for a watch provider
+ */
+export function buildProviderLogoUrl(logoPath: string | null): string | null {
+  if (!logoPath) return null;
+  return `https://image.tmdb.org/t/p/w92${logoPath}`;
+}
+
 // Verify that ALL identified actors appear in a movie's cast
 export async function verifyActorsInMovie(
   tmdbId: number, 

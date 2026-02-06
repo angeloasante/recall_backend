@@ -1,194 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+import { getWatchProviders, buildProviderLogoUrl, WatchProvider } from '@/lib/tmdb';
 
 export interface StreamingProvider {
   name: string;
   type: 'subscription' | 'rent' | 'buy' | 'free';
-  url: string;
-  price?: string;
-  logo?: string;
+  logo_url: string | null;
+  provider_id: number;
 }
 
 export interface StreamingData {
   providers: StreamingProvider[];
+  subscription: StreamingProvider[];
+  rent: StreamingProvider[];
+  buy: StreamingProvider[];
+  free: StreamingProvider[];
+  justwatch_url: string | null;
   updated_at: string;
   country: string;
 }
 
-// Streaming service logos and colors
-const SERVICE_METADATA: Record<string, { logo: string; color: string }> = {
-  'netflix': { logo: '🔴', color: '#E50914' },
-  'amazon prime video': { logo: '🔵', color: '#00A8E1' },
-  'prime video': { logo: '🔵', color: '#00A8E1' },
-  'disney+': { logo: '🏰', color: '#113CCF' },
-  'disney plus': { logo: '🏰', color: '#113CCF' },
-  'hulu': { logo: '🟢', color: '#1CE783' },
-  'max': { logo: '🟣', color: '#741DDA' },
-  'hbo max': { logo: '🟣', color: '#741DDA' },
-  'apple tv+': { logo: '🍎', color: '#000000' },
-  'apple tv': { logo: '🍎', color: '#000000' },
-  'peacock': { logo: '🦚', color: '#000000' },
-  'paramount+': { logo: '⛰️', color: '#0064FF' },
-  'paramount plus': { logo: '⛰️', color: '#0064FF' },
-  'youtube': { logo: '▶️', color: '#FF0000' },
-  'youtube premium': { logo: '▶️', color: '#FF0000' },
-  'tubi': { logo: '📺', color: '#FA382F' },
-  'pluto tv': { logo: '📡', color: '#2E236C' },
-  'vudu': { logo: '💚', color: '#35BEE8' },
-  'fandango at home': { logo: '💚', color: '#35BEE8' },
-  'google play': { logo: '🎮', color: '#4285F4' },
-  'itunes': { logo: '🎵', color: '#FB5BC5' },
-  'crunchyroll': { logo: '🍊', color: '#F47521' },
-  'shudder': { logo: '👻', color: '#C31432' },
-  'mubi': { logo: '🎬', color: '#000000' },
-  'criterion channel': { logo: '🎞️', color: '#000000' },
-  'starz': { logo: '⭐', color: '#000000' },
-  'showtime': { logo: '🎭', color: '#B71818' },
-  'mgm+': { logo: '🦁', color: '#D4AF37' },
-  'amc+': { logo: '📺', color: '#000000' },
-  'bet+': { logo: '📺', color: '#000000' },
-  'britbox': { logo: '🇬🇧', color: '#CF142B' },
-};
-
 /**
- * Use Gemini to find streaming availability for a movie
+ * Convert TMDB watch provider to our format
  */
-async function findStreamingWithGemini(
-  title: string,
-  year: number | null,
-  imdbId: string | null
-): Promise<StreamingProvider[]> {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not configured');
-  }
-
-  const movieIdentifier = imdbId 
-    ? `${title} (${year || 'unknown year'}) - IMDB: ${imdbId}`
-    : `${title} (${year || 'unknown year'})`;
-
-  const response = await fetch(
-    `${GEMINI_BASE_URL}/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `Find US streaming availability for: ${movieIdentifier}
-
-Return ONLY a JSON array with available platforms. Example format:
-[{"name":"Disney+","type":"subscription","url":"https://disneyplus.com/movies/..."}]
-
-Types: subscription, rent, buy, free
-For rent/buy add price field.
-Only include platforms where this movie is ACTUALLY available.
-If unsure, return empty array: []`
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 2048,
-        },
-      }),
-    }
-  );
-
-  const data = await response.json();
-  
-  if (data.error) {
-    console.error('Gemini API error:', data.error);
-    throw new Error(data.error.message);
-  }
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-  console.log('Gemini streaming response (full):', text);
-  
-  // Extract JSON from response (handle potential markdown wrapping)
-  let jsonStr = text.trim();
-  
-  // Remove markdown code blocks if present
-  if (jsonStr.startsWith('```')) {
-    jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```\s*$/g, '').trim();
-  }
-  
-  // Find the opening bracket
-  const startIdx = jsonStr.indexOf('[');
-  if (startIdx === -1) {
-    console.log('No JSON array found in response');
-    return [];
-  }
-  
-  jsonStr = jsonStr.substring(startIdx);
-  
-  // Try to fix truncated JSON by ensuring proper closing
-  if (!jsonStr.endsWith(']')) {
-    // Count brackets to see if we need to close
-    let openBrackets = 0;
-    let inString = false;
-    let lastValidEnd = -1;
-    
-    for (let i = 0; i < jsonStr.length; i++) {
-      const char = jsonStr[i];
-      const prevChar = i > 0 ? jsonStr[i-1] : '';
-      
-      if (char === '"' && prevChar !== '\\') {
-        inString = !inString;
-      }
-      
-      if (!inString) {
-        if (char === '{') openBrackets++;
-        if (char === '}') {
-          openBrackets--;
-          if (openBrackets === 0) {
-            lastValidEnd = i;
-          }
-        }
-      }
-    }
-    
-    // Close at last complete object
-    if (lastValidEnd > 0) {
-      jsonStr = jsonStr.substring(0, lastValidEnd + 1) + ']';
-      console.log('Fixed truncated JSON, closing at position:', lastValidEnd);
-    }
-  }
-
-  try {
-    const providers: StreamingProvider[] = JSON.parse(jsonStr);
-    
-    // Add logos and validate
-    return providers
-      .filter(p => p.name && p.type && p.url)
-      .map(p => {
-        const key = p.name.toLowerCase();
-        const metadata = SERVICE_METADATA[key] || { logo: '📺', color: '#666666' };
-        return {
-          ...p,
-          logo: metadata.logo,
-        };
-      });
-  } catch (e) {
-    console.error('Failed to parse streaming response:', text);
-    return [];
-  }
+function convertProvider(
+  provider: WatchProvider,
+  type: 'subscription' | 'rent' | 'buy' | 'free'
+): StreamingProvider {
+  return {
+    name: provider.provider_name,
+    type,
+    logo_url: buildProviderLogoUrl(provider.logo_path),
+    provider_id: provider.provider_id,
+  };
 }
 
-// GET /api/movies/[id]/streaming - Get streaming availability
+// GET /api/movies/[id]/streaming - Get streaming availability from TMDB
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
   const forceRefresh = req.nextUrl.searchParams.get('refresh') === 'true';
+  const country = req.nextUrl.searchParams.get('country') || 'US';
 
   try {
     // Get movie from database
     const { data: movie, error: movieError } = await supabaseAdmin
       .from('movies')
-      .select('id, title, year, imdb_id, streaming_providers')
+      .select('id, title, year, tmdb_id, streaming_providers')
       .eq('id', id)
       .single();
 
@@ -196,14 +56,28 @@ export async function GET(
       return NextResponse.json({ error: 'Movie not found' }, { status: 404 });
     }
 
-    // Check if we have cached data that's less than 7 days old
+    if (!movie.tmdb_id) {
+      return NextResponse.json({ 
+        error: 'No TMDB ID for this movie',
+        providers: [],
+        subscription: [],
+        rent: [],
+        buy: [],
+        free: [],
+        justwatch_url: null,
+        updated_at: new Date().toISOString(),
+        country,
+      });
+    }
+
+    // Check if we have cached data that's less than 24 hours old
     if (!forceRefresh && movie.streaming_providers) {
       const cached = movie.streaming_providers as StreamingData;
       const updatedAt = new Date(cached.updated_at);
-      const daysSinceUpdate = (Date.now() - updatedAt.getTime()) / (1000 * 60 * 60 * 24);
+      const hoursSinceUpdate = (Date.now() - updatedAt.getTime()) / (1000 * 60 * 60);
       
-      if (daysSinceUpdate < 7) {
-        console.log(`📺 Using cached streaming data for "${movie.title}" (${daysSinceUpdate.toFixed(1)} days old)`);
+      if (hoursSinceUpdate < 24 && cached.country === country) {
+        console.log(`📺 Using cached streaming data for "${movie.title}" (${hoursSinceUpdate.toFixed(1)}h old)`);
         return NextResponse.json({
           ...cached,
           cached: true,
@@ -211,19 +85,48 @@ export async function GET(
       }
     }
 
-    // Fetch fresh data from Gemini
-    console.log(`🔍 Fetching streaming availability for "${movie.title}" (${movie.year})`);
+    // Fetch fresh data from TMDB
+    console.log(`🔍 Fetching TMDB watch providers for "${movie.title}" (TMDB: ${movie.tmdb_id})`);
     
-    const providers = await findStreamingWithGemini(
-      movie.title,
-      movie.year,
-      movie.imdb_id
-    );
+    const watchProviders = await getWatchProviders(movie.tmdb_id, 'movie', country);
+    
+    if (!watchProviders) {
+      const emptyData: StreamingData = {
+        providers: [],
+        subscription: [],
+        rent: [],
+        buy: [],
+        free: [],
+        justwatch_url: null,
+        updated_at: new Date().toISOString(),
+        country,
+      };
+      
+      return NextResponse.json({
+        ...emptyData,
+        cached: false,
+        message: 'No streaming data available for this title',
+      });
+    }
+
+    // Convert to our format
+    const subscription = (watchProviders.flatrate || []).map(p => convertProvider(p, 'subscription'));
+    const rent = (watchProviders.rent || []).map(p => convertProvider(p, 'rent'));
+    const buy = (watchProviders.buy || []).map(p => convertProvider(p, 'buy'));
+    const free = (watchProviders.free || []).map(p => convertProvider(p, 'free'));
+    
+    // Combine all providers for backward compatibility
+    const allProviders = [...subscription, ...rent, ...buy, ...free];
 
     const streamingData: StreamingData = {
-      providers,
+      providers: allProviders,
+      subscription,
+      rent,
+      buy,
+      free,
+      justwatch_url: watchProviders.link || null,
       updated_at: new Date().toISOString(),
-      country: 'US',
+      country,
     };
 
     // Cache in database
@@ -235,7 +138,7 @@ export async function GET(
     if (updateError) {
       console.error('Failed to cache streaming data:', updateError);
     } else {
-      console.log(`✅ Cached ${providers.length} streaming providers for "${movie.title}"`);
+      console.log(`✅ Cached ${allProviders.length} streaming providers for "${movie.title}" (${subscription.length} sub, ${rent.length} rent, ${buy.length} buy, ${free.length} free)`);
     }
 
     return NextResponse.json({
