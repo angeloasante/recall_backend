@@ -77,35 +77,20 @@ async function findStreamingWithGemini(
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `You are a streaming availability expert. Find where to watch this movie in the United States:
+            text: `Find US streaming availability for: ${movieIdentifier}
 
-Movie: ${movieIdentifier}
+Return ONLY a JSON array with available platforms. Example format:
+[{"name":"Disney+","type":"subscription","url":"https://disneyplus.com/movies/..."}]
 
-Search your knowledge for where this movie is currently available to stream, rent, or buy in the US. Consider major platforms like:
-- Netflix, Amazon Prime Video, Disney+, Hulu, Max (HBO Max), Apple TV+, Peacock, Paramount+
-- Rental/Purchase: Amazon, Apple TV, Google Play, Vudu/Fandango at Home, YouTube
-- Free with ads: Tubi, Pluto TV, Peacock Free, Freevee
-
-IMPORTANT: Only include platforms where this SPECIFIC movie is actually available. Do not guess - if unsure, don't include it.
-
-Respond with a JSON array ONLY (no markdown, no explanation):
-[
-  {"name": "Platform Name", "type": "subscription|rent|buy|free", "url": "direct_url_to_movie", "price": "$X.XX"},
-  ...
-]
-
-Rules:
-- "type" must be one of: "subscription", "rent", "buy", "free"
-- For subscription services, omit "price"
-- For rent/buy, include the typical price like "$3.99" or "$14.99"
-- "url" should be the most direct link to watch/find the movie on that platform
-- If you cannot find any streaming info, return an empty array: []
-- Return ONLY the JSON array, no other text`
+Types: subscription, rent, buy, free
+For rent/buy add price field.
+Only include platforms where this movie is ACTUALLY available.
+If unsure, return empty array: []`
           }]
         }],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
         },
       }),
     }
@@ -119,12 +104,29 @@ Rules:
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+  console.log('Gemini streaming response:', text.substring(0, 500));
   
   // Extract JSON from response (handle potential markdown wrapping)
-  let jsonStr = text;
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  let jsonStr = text.trim();
+  
+  // Remove markdown code blocks if present
+  if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+  }
+  
+  // Try to find JSON array in response
+  const jsonMatch = jsonStr.match(/\[[\s\S]*?\]/);
   if (jsonMatch) {
     jsonStr = jsonMatch[0];
+  }
+
+  // Try to fix truncated JSON by closing brackets
+  if (!jsonStr.endsWith(']')) {
+    // Find last complete object
+    const lastCompleteObj = jsonStr.lastIndexOf('}');
+    if (lastCompleteObj > 0) {
+      jsonStr = jsonStr.substring(0, lastCompleteObj + 1) + ']';
+    }
   }
 
   try {
