@@ -104,28 +104,55 @@ If unsure, return empty array: []`
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-  console.log('Gemini streaming response:', text.substring(0, 500));
+  console.log('Gemini streaming response (full):', text);
   
   // Extract JSON from response (handle potential markdown wrapping)
   let jsonStr = text.trim();
   
   // Remove markdown code blocks if present
   if (jsonStr.startsWith('```')) {
-    jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+    jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```\s*$/g, '').trim();
   }
   
-  // Try to find JSON array in response
-  const jsonMatch = jsonStr.match(/\[[\s\S]*?\]/);
-  if (jsonMatch) {
-    jsonStr = jsonMatch[0];
+  // Find the opening bracket
+  const startIdx = jsonStr.indexOf('[');
+  if (startIdx === -1) {
+    console.log('No JSON array found in response');
+    return [];
   }
-
-  // Try to fix truncated JSON by closing brackets
+  
+  jsonStr = jsonStr.substring(startIdx);
+  
+  // Try to fix truncated JSON by ensuring proper closing
   if (!jsonStr.endsWith(']')) {
-    // Find last complete object
-    const lastCompleteObj = jsonStr.lastIndexOf('}');
-    if (lastCompleteObj > 0) {
-      jsonStr = jsonStr.substring(0, lastCompleteObj + 1) + ']';
+    // Count brackets to see if we need to close
+    let openBrackets = 0;
+    let inString = false;
+    let lastValidEnd = -1;
+    
+    for (let i = 0; i < jsonStr.length; i++) {
+      const char = jsonStr[i];
+      const prevChar = i > 0 ? jsonStr[i-1] : '';
+      
+      if (char === '"' && prevChar !== '\\') {
+        inString = !inString;
+      }
+      
+      if (!inString) {
+        if (char === '{') openBrackets++;
+        if (char === '}') {
+          openBrackets--;
+          if (openBrackets === 0) {
+            lastValidEnd = i;
+          }
+        }
+      }
+    }
+    
+    // Close at last complete object
+    if (lastValidEnd > 0) {
+      jsonStr = jsonStr.substring(0, lastValidEnd + 1) + ']';
+      console.log('Fixed truncated JSON, closing at position:', lastValidEnd);
     }
   }
 
